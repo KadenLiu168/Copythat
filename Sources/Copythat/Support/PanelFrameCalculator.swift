@@ -4,7 +4,7 @@ enum PanelFrameCalculator {
     static let preferredWidthRatio: CGFloat = 0.96
     static let minimumWidth: CGFloat = 560
     static let maximumWidth: CGFloat = 2_200
-    static let height: CGFloat = 410
+    static let height: CGFloat = 342
     static let sideMargin: CGFloat = 12
     static let bottomMargin: CGFloat = 24
 

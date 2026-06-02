@@ -53,7 +53,7 @@ final class PanelWindowController {
 
     private func makePanel() -> CopythatPanel {
         let panel = CopythatPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 342),
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
