@@ -1,0 +1,17 @@
+.build/
+dist/
+.DS_Store
+.swiftpm/
+.claude/
+.codex/
+*.log
+*.tmp
+*.bak
+*.orig
+*.swp
+*.swo
+*.dSYM/
+*.xcarchive/
+*.xcuserstate
+xcuserdata/
+DerivedData/
