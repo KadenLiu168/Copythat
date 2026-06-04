@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 
 struct BottomPanelView: View {
-    private let panelCornerRadius: CGFloat = 26
     private let settings: AppSettings
     @ObservedObject private var store: ClipboardStore
     @State private var searchExpanded = false
@@ -47,13 +46,13 @@ struct BottomPanelView: View {
     }
 
     private var panelContainer: some View {
-        let panelShape = RoundedRectangle(cornerRadius: panelCornerRadius, style: .continuous)
+        let panelShape = RoundedRectangle(cornerRadius: CopythatTokens.Panel.cornerRadius, style: .continuous)
 
         return ZStack {
             VisualEffectView(
                 material: .popover,
                 blendingMode: .behindWindow,
-                cornerRadius: panelCornerRadius
+                cornerRadius: CopythatTokens.Panel.cornerRadius
             )
 
             panelTint
@@ -68,21 +67,23 @@ struct BottomPanelView: View {
             .padding(.bottom, 12)
             .frame(maxHeight: .infinity)
         }
-        .background(Color.clear)
         .clipShape(panelShape)
         .contentShape(panelShape)
         .overlay {
             panelShape
-                .stroke(.white.opacity(0.66), lineWidth: 1)
+                .inset(by: CopythatTokens.Panel.strokeInset)
+                .stroke(.white.opacity(CopythatTokens.Panel.strokeOpacity), lineWidth: CopythatTokens.Panel.strokeWidth)
         }
-        .overlay(alignment: .top) {
-            panelShape
-                .stroke(.white.opacity(0.22), lineWidth: 1)
-                .blur(radius: 0.5)
-                .offset(y: 1)
-        }
-        .shadow(color: Color(red: 0.95, green: 0.47, blue: 0.10).opacity(0.44), radius: 28, y: 16)
-        .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
+        .shadow(
+            color: CopythatTokens.Panel.shadowOrange.color,
+            radius: CopythatTokens.Panel.shadowOrange.radius,
+            y: CopythatTokens.Panel.shadowOrange.y
+        )
+        .shadow(
+            color: CopythatTokens.Panel.shadowBlack.color,
+            radius: CopythatTokens.Panel.shadowBlack.radius,
+            y: CopythatTokens.Panel.shadowBlack.y
+        )
         .compositingGroup()
     }
 
@@ -156,10 +157,7 @@ struct BottomPanelView: View {
             .padding(.horizontal, 11)
             .frame(width: 170, height: 30)
             .background(Color.white.opacity(0.44), in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(.white.opacity(0.55), lineWidth: 1)
-            }
+            .glassHairline()
         } else {
             Button {
                 withAnimation(.snappy(duration: 0.16)) {
