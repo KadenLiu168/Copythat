@@ -4,6 +4,7 @@ dist/
 .swiftpm/
 .claude/
 .codex/
+AGENTS.md
 *.log
 *.tmp
 *.bak
