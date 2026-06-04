@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct ClipboardCardView: View {
+struct ClipboardCardView: View, Equatable {
     private let cardSize = CGSize(width: 236, height: 236)
     private let headerHeight: CGFloat = 52
     private let headerIconSize: CGFloat = 52
@@ -18,6 +18,12 @@ struct ClipboardCardView: View {
     let onTogglePin: () -> Void
     let onMoveToPinboard: (String?) -> Void
     let onDelete: () -> Void
+
+    static func == (lhs: ClipboardCardView, rhs: ClipboardCardView) -> Bool {
+        lhs.item == rhs.item &&
+            lhs.pinboards == rhs.pinboards &&
+            lhs.isSelected == rhs.isSelected
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,11 +47,14 @@ struct ClipboardCardView: View {
         .zIndex(isSelected ? 1 : 0)
         .contentShape(cardShape)
         .animation(.snappy(duration: 0.18), value: isSelected)
-        .onTapGesture {
-            onSelect()
-            NSApp.keyWindow?.makeFirstResponder(nil)
-        }
-        .onTapGesture(count: 2, perform: onPaste)
+        .onTapGesture(perform: selectForClick)
+        .simultaneousGesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    selectForClick()
+                    onPaste()
+                }
+        )
         .contextMenu {
             Button(item.isPinned ? "Unpin" : "Pin", action: onTogglePin)
             if !pinboards.isEmpty {
@@ -108,7 +117,7 @@ struct ClipboardCardView: View {
     @ViewBuilder
     private var iconCarrier: some View {
         if let icon = sourceIconForDisplay {
-            SourceLogoImageView(image: icon)
+            SourceLogoImageView(image: icon, identity: sourceIconIdentity)
                 .id(sourceIconIdentity)
                 .frame(width: headerIconSize, height: headerIconSize)
                 .saturation(1.18)
@@ -303,6 +312,11 @@ struct ClipboardCardView: View {
         return NSItemProvider(object: (item.textValue ?? item.preview) as NSString)
     }
 
+    private func selectForClick() {
+        onSelect()
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
     var sourceIconForDisplay: NSImage? {
         item.sourceAppIcon
     }
@@ -318,17 +332,30 @@ struct ClipboardCardView: View {
 
 private struct SourceLogoImageView: NSViewRepresentable {
     let image: NSImage
+    let identity: Int
 
     func makeNSView(context: Context) -> NSImageView {
         let imageView = NSImageView()
         imageView.imageAlignment = .alignCenter
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.wantsLayer = true
+        imageView.image = image.copy() as? NSImage ?? image
+        context.coordinator.identity = identity
         return imageView
     }
 
     func updateNSView(_ imageView: NSImageView, context: Context) {
+        guard context.coordinator.identity != identity || imageView.image == nil else { return }
         imageView.image = image.copy() as? NSImage ?? image
+        context.coordinator.identity = identity
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        var identity: Int?
     }
 }
 

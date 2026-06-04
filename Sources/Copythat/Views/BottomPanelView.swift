@@ -117,14 +117,28 @@ struct BottomPanelView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 14) {
-            searchControl
-                .layoutPriority(searchExpanded ? 1 : 0)
-            pinboardStrip
-                .layoutPriority(2)
-            addButton
+        GeometryReader { proxy in
+            let searchWidth: CGFloat = searchExpanded || !store.searchText.isEmpty ? 188 : 32
+            let leftSpacing: CGFloat = 8
+            let sideReserve = max(160, searchWidth + 128)
+            let maxCenterWidth = max(80, proxy.size.width - sideReserve * 2)
+
+            ZStack {
+                HStack(spacing: leftSpacing) {
+                    searchControl
+                        .frame(width: searchWidth, alignment: .leading)
+                    pinboardButton(for: .all)
+                        .frame(height: 32)
+                    Spacer(minLength: 0)
+                    addButton
+                        .frame(width: 32, height: 32)
+                }
+
+                centerPinboardStrip(maxWidth: maxCenterWidth)
+                    .frame(maxWidth: maxCenterWidth)
+            }
         }
-        .frame(height: 34)
+        .frame(height: 36)
     }
 
     @ViewBuilder
@@ -152,133 +166,141 @@ struct BottomPanelView: View {
                 }
             }
             .padding(.horizontal, 11)
-            .frame(width: 170, height: 30)
-            .background(Color.white.opacity(0.44), in: Capsule())
+            .frame(height: 32)
+            .background(Color.white.opacity(searchFocused ? 0.52 : 0.36), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay {
-                Capsule()
-                    .stroke(.white.opacity(0.55), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(searchFocused ? Color(red: 0.22, green: 0.19, blue: 0.15).opacity(0.24) : .white.opacity(0.48), lineWidth: 1)
             }
+            .shadow(color: Color(red: 0.44, green: 0.25, blue: 0.12).opacity(searchFocused ? 0.12 : 0.06), radius: searchFocused ? 8 : 4, y: 2)
+            .animation(.snappy(duration: 0.16), value: searchFocused)
         } else {
-            Button {
+            CommandBarIconButton(systemName: "magnifyingglass", fontSize: 15, helpText: "Search") {
                 withAnimation(.snappy(duration: 0.16)) {
                     searchExpanded = true
                 }
                 DispatchQueue.main.async {
                     searchFocused = true
                 }
-            } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(CopythatFont.font(size: 15, weight: .medium))
-                    .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.12))
-                    .frame(width: 30, height: 30)
             }
-            .buttonStyle(.plain)
-            .help("Search")
         }
     }
 
-    private var pinboardStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 15) {
-                ForEach(availablePinboards, id: \.id) { board in
-                    pinboardButton(for: board)
-                }
+    private func centerPinboardStrip(maxWidth: CGFloat) -> some View {
+        ViewThatFits(in: .horizontal) {
+            pinboardContent(for: centerPinboards, spacing: 12)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                pinboardContent(for: centerPinboards, spacing: 12)
             }
-            .padding(.horizontal, 1)
+            .frame(width: maxWidth)
+            .scrollClipDisabled()
         }
-        .scrollClipDisabled()
+    }
+
+    private func pinboardContent(for boards: [Pinboard], spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            ForEach(boards, id: \.id) { board in
+                pinboardButton(for: board)
+            }
+        }
+        .frame(height: 32)
     }
 
     private func pinboardButton(for board: Pinboard) -> some View {
         let isSelected = store.selectedBoardID == board.id
 
-        return Button {
+        return PinboardFilterButton(
+            board: board,
+            title: displayTitle(for: board),
+            dotColor: pinboardDotColor(for: board),
+            isSelected: isSelected
+        ) {
             store.selectedBoardID = board.id
-        } label: {
-            HStack(spacing: 6) {
-                if board.kind == .all {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(CopythatFont.font(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.22, green: 0.20, blue: 0.17).opacity(0.72))
-                } else {
-                    Circle()
-                        .fill(pinboardDotColor(for: board))
-                        .frame(width: 10, height: 10)
-                        .overlay(alignment: .trailing) {
-                            if board.kind == .custom, board.title.localizedCaseInsensitiveContains("email") {
-                                Circle()
-                                    .fill(Color(red: 0.14, green: 0.72, blue: 0.34))
-                                    .frame(width: 10, height: 10)
-                                    .offset(x: 7)
-                            }
-                        }
-                }
-
-                Text(displayTitle(for: board))
-                    .font(CopythatFont.font(size: 12, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(Color(red: 0.18, green: 0.16, blue: 0.13))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, board.kind == .all ? 11 : 0)
-            .frame(height: 28)
-            .background {
-                if isSelected {
-                    Capsule()
-                        .fill(Color(red: 0.18, green: 0.16, blue: 0.13).opacity(0.12))
-                }
-            }
         }
-        .buttonStyle(.plain)
     }
 
     private var addButton: some View {
-        Button {
+        CommandBarIconButton(systemName: "plus", fontSize: 16, helpText: "Open Settings") {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } label: {
-            Image(systemName: "plus")
-                .font(CopythatFont.font(size: 16, weight: .medium))
-                .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.12))
-                .frame(width: 30, height: 30)
         }
-        .buttonStyle(.plain)
-        .help("Open Settings")
     }
 
+    @ViewBuilder
     private var timeline: some View {
+        if store.filteredItems.isEmpty {
+            emptyTimeline
+        } else {
+            cardTimeline
+        }
+    }
+
+    private var emptyTimeline: some View {
+        let copy = emptyTimelineCopy
+
+        return EmptyTimelineView(title: copy.title, description: copy.description)
+            .frame(maxWidth: .infinity)
+            .frame(height: 258)
+            .frame(maxHeight: .infinity, alignment: .center)
+    }
+
+    private var cardTimeline: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 28) {
-                    if store.filteredItems.isEmpty {
-                        EmptyTimelineView()
-                    } else {
-                        ForEach(store.filteredItems) { item in
-                            ClipboardCardView(
-                                item: item,
-                                pinboards: settings.customPinboards,
-                                isSelected: item.id == store.selectedItem?.id,
-                                onSelect: { store.select(item) },
-                                onPaste: onPaste,
-                                onTogglePin: { store.togglePin(item) },
-                                onMoveToPinboard: { name in store.move(item, toPinboard: name) },
-                                onDelete: { store.remove(item) }
-                            )
-                            .id(item.id)
-                            .zIndex(item.id == store.selectedItem?.id ? 1 : 0)
-                        }
+                    ForEach(store.filteredItems) { item in
+                        timelineCard(for: item, selectedID: store.selectedID)
                     }
                 }
                 .padding(.horizontal, 6)
-                .padding(.top, 8)
+                .padding(.top, 16)
                 .frame(height: 258)
             }
+            .scrollClipDisabled()
             .frame(maxHeight: .infinity, alignment: .center)
-            .onChange(of: store.selectedItem?.id) { _, id in
+            .onChange(of: store.selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.snappy(duration: 0.18)) {
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
         }
+    }
+
+    private var emptyTimelineCopy: (title: String, description: String) {
+        let query = store.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            return ("No matching clips", "Try another search or clear the query.")
+        }
+
+        let board = Pinboard(id: store.selectedBoardID)
+        switch board.kind {
+        case .all, .unknown:
+            return ("Copy something to start", "Text, links, images, and file paths will appear here.")
+        case .pinned:
+            return ("No pinned clips", "Pin copied items to keep them close.")
+        case .custom:
+            let title = board.title.isEmpty ? "this pinboard" : board.title
+            return ("No clips in \(title)", "Move copied items here from a card menu.")
+        }
+    }
+
+    private func timelineCard(for item: ClipboardItem, selectedID: UUID?) -> some View {
+        let isSelected = item.id == selectedID
+
+        return ClipboardCardView(
+            item: item,
+            pinboards: settings.customPinboards,
+            isSelected: isSelected,
+            onSelect: { store.select(item) },
+            onPaste: onPaste,
+            onTogglePin: { store.togglePin(item) },
+            onMoveToPinboard: { name in store.move(item, toPinboard: name) },
+            onDelete: { store.remove(item) }
+        )
+        .equatable()
+        .id(item.id)
+        .zIndex(isSelected ? 1 : 0)
     }
 
     private var footer: some View {
@@ -304,8 +326,8 @@ struct BottomPanelView: View {
         .lineLimit(1)
     }
 
-    private var availablePinboards: [Pinboard] {
-        [Pinboard.all, Pinboard.pinned] + settings.customPinboards.map { Pinboard.custom($0) }
+    private var centerPinboards: [Pinboard] {
+        [Pinboard.pinned] + settings.customPinboards.map { Pinboard.custom($0) }
     }
 
     private func displayTitle(for board: Pinboard) -> String {
@@ -337,5 +359,141 @@ struct BottomPanelView: View {
         if let url {
             NSWorkspace.shared.open(url)
         }
+    }
+}
+
+private struct CommandBarIconButton: View {
+    let systemName: String
+    let fontSize: CGFloat
+    let helpText: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(CopythatFont.font(size: fontSize, weight: .medium))
+                .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.12))
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(CommandBarIconButtonStyle(isHovered: isHovered))
+        .onHover { hovering in
+            withAnimation(.snappy(duration: 0.14)) {
+                isHovered = hovering
+            }
+        }
+        .help(helpText)
+    }
+}
+
+private struct CommandBarIconButtonStyle: ButtonStyle {
+    let isHovered: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(backgroundOpacity(isPressed: configuration.isPressed)))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(.white.opacity(isHovered ? 0.48 : 0.28), lineWidth: 1)
+            }
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .shadow(
+                color: Color(red: 0.44, green: 0.25, blue: 0.12).opacity(isHovered ? 0.10 : 0.04),
+                radius: isHovered ? 7 : 4,
+                y: 2
+            )
+    }
+
+    private func backgroundOpacity(isPressed: Bool) -> Double {
+        if isPressed {
+            return 0.50
+        }
+        return isHovered ? 0.38 : 0.22
+    }
+}
+
+private struct PinboardFilterButton: View {
+    let board: Pinboard
+    let title: String
+    let dotColor: Color
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                marker
+
+                Text(title)
+                    .font(CopythatFont.font(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(Color(red: 0.18, green: 0.16, blue: 0.13).opacity(isSelected ? 0.96 : 0.82))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, board.kind == .all ? 10 : 9)
+            .frame(height: 26)
+        }
+        .buttonStyle(PinboardFilterButtonStyle(isSelected: isSelected, isHovered: isHovered))
+        .onHover { hovering in
+            withAnimation(.snappy(duration: 0.14)) {
+                isHovered = hovering
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var marker: some View {
+        if board.kind == .all {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(CopythatFont.font(size: 11.5, weight: .semibold))
+                .foregroundStyle(Color(red: 0.22, green: 0.20, blue: 0.17).opacity(isSelected ? 0.70 : 0.56))
+        } else {
+            Capsule(style: .continuous)
+                .fill(dotColor.opacity(isSelected ? 0.95 : 0.72))
+                .frame(width: 11, height: 4.5)
+                .overlay(alignment: .top) {
+                    Capsule(style: .continuous)
+                        .fill(.white.opacity(isSelected ? 0.34 : 0.22))
+                        .frame(height: 1)
+                }
+        }
+    }
+}
+
+private struct PinboardFilterButtonStyle: ButtonStyle {
+    let isSelected: Bool
+    let isHovered: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(backgroundColor(isPressed: configuration.isPressed))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
+            }
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color(red: 0.18, green: 0.16, blue: 0.13).opacity(0.13)
+        }
+        if isSelected {
+            return Color.white.opacity(0.36)
+        }
+        return Color.white.opacity(isHovered ? 0.20 : 0.0)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isSelected {
+            return Color(red: 0.18, green: 0.16, blue: 0.13).opacity(0.13)
+        }
+        return .white.opacity(isHovered || isPressed ? 0.28 : 0.0)
     }
 }

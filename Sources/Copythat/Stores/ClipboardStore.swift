@@ -25,13 +25,12 @@ final class ClipboardStore: ObservableObject {
     private var imageEncodingTask: Task<Void, Never>?
     private var lastChangeCount: Int
 
-    init(settings: AppSettings, sourceTracker: CopySourceTracker) {
+    init(settings: AppSettings, sourceTracker: CopySourceTracker, initialItems: [ClipboardItem]? = nil) {
         self.settings = settings
         self.sourceTracker = sourceTracker
         lastChangeCount = pasteboard.changeCount
-        items = ClipboardHistoryPersistence.loadItems().map(\.storageOptimized)
+        items = initialItems ?? ClipboardHistoryPersistence.loadItems().map(\.storageOptimized)
         refreshFilteredItems()
-        selectedID = items.first?.id
     }
 
     var selectedItem: ClipboardItem? {
@@ -75,7 +74,7 @@ final class ClipboardStore: ObservableObject {
     }
 
     func selectFirstVisibleItem() {
-        selectedID = filteredItems.first?.id
+        selectID(filteredItems.first?.id)
     }
 
     func clearPermissionMessage() {
@@ -83,18 +82,18 @@ final class ClipboardStore: ObservableObject {
     }
 
     func select(_ item: ClipboardItem) {
-        selectedID = item.id
+        selectID(item.id)
     }
 
     func moveSelection(_ delta: Int) {
         let visible = filteredItems
         guard !visible.isEmpty else {
-            selectedID = nil
+            selectID(nil)
             return
         }
         let currentIndex = visible.firstIndex { $0.id == selectedID } ?? 0
         let nextIndex = min(max(currentIndex + delta, 0), visible.count - 1)
-        selectedID = visible[nextIndex].id
+        selectID(visible[nextIndex].id)
     }
 
     func togglePin(_ item: ClipboardItem) {
@@ -115,7 +114,7 @@ final class ClipboardStore: ObservableObject {
     func remove(_ item: ClipboardItem) {
         items.removeAll { $0.id == item.id }
         if selectedID == item.id {
-            selectedID = filteredItems.first?.id
+            selectID(filteredItems.first?.id)
         }
         saveItems()
     }
@@ -409,10 +408,19 @@ final class ClipboardStore: ObservableObject {
             let searchMatches = query.isEmpty || item.searchText.contains(query)
             return boardMatches && searchMatches
         }
+        if let selectedID, filteredItems.contains(where: { $0.id == selectedID }) {
+            return
+        }
+        selectID(filteredItems.first?.id)
     }
 
     private func saveItems() {
         ClipboardHistoryPersistence.save(items)
+    }
+
+    private func selectID(_ id: UUID?) {
+        guard selectedID != id else { return }
+        selectedID = id
     }
 }
 

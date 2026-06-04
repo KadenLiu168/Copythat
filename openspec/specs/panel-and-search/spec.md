@@ -2,9 +2,7 @@
 
 ## Purpose
 Copythat provides a compact bottom panel for browsing clipboard history, filtering by pinboard, searching content, and selecting items for paste.
-
 ## Requirements
-
 ### Requirement: Open from menu bar or global shortcut
 Copythat SHALL remain available from the macOS menu bar and the registered global shortcut.
 
@@ -37,7 +35,7 @@ Copythat SHALL display clipboard history in a bottom floating panel that fits th
 - **THEN** Copythat closes the panel
 
 ### Requirement: Browse and select visible items
-Copythat SHALL let users browse visible clipboard items horizontally and maintain a selected item.
+Copythat SHALL let users browse visible clipboard items horizontally, maintain a selected item, and show a balanced empty timeline state when no items are visible.
 
 #### Scenario: History has visible items
 - **WHEN** the panel displays matching history items
@@ -50,6 +48,16 @@ Copythat SHALL let users browse visible clipboard items horizontally and maintai
 #### Scenario: No items are visible
 - **WHEN** filters and search produce no visible items
 - **THEN** Copythat shows an empty timeline state instead of item cards
+- **AND** the empty state is visually centered within the timeline content area rather than aligned to the leading card position
+- **AND** the empty state does not show the app logo as a prominent primary graphic
+
+#### Scenario: Selected pinboard has no items
+- **WHEN** the user selects a pinboard with no matching visible items
+- **THEN** Copythat shows empty-state copy that identifies the selected pinboard context
+
+#### Scenario: Search has no matches
+- **WHEN** the user enters a search query that matches no visible items
+- **THEN** Copythat shows empty-state copy that identifies the empty search result context
 
 ### Requirement: Display compact card headers
 Copythat SHALL display each visible history card with a compact header that separates the item kind, timestamp, and source icon without crowding the card edge.
@@ -130,3 +138,57 @@ Copythat SHALL show useful status information at the bottom of the panel.
 - **WHEN** a paste or permission issue sets a message
 - **THEN** Copythat shows that message in the panel footer
 - **AND** offers an action to open Accessibility settings
+
+### Requirement: Display a clear panel command bar
+Copythat SHALL present the bottom panel header as a compact command bar that visually separates search, pinboard filtering, and the add/settings action without changing their behavior.
+
+#### Scenario: Panel header displays default controls
+- **WHEN** the bottom panel is visible and search is not expanded
+- **THEN** the header shows a compact search control on the left
+- **AND** shows the available pinboard filters as a grouped horizontal control in the center
+- **AND** shows a compact add/settings control on the right
+
+#### Scenario: Selected pinboard remains clear
+- **WHEN** a pinboard filter is selected
+- **THEN** the selected filter is visually distinct from unselected filters
+- **AND** the selected state does not visually dominate the clipboard item cards
+
+#### Scenario: Search expands without breaking header layout
+- **WHEN** the user expands search or enters a search query
+- **THEN** the search field remains in the left command bar area
+- **AND** the pinboard filters remain horizontally scrollable when space is constrained
+- **AND** the add/settings control remains available on the right
+
+#### Scenario: Header controls provide interaction feedback
+- **WHEN** the user hovers, presses, or focuses a top command bar control
+- **THEN** Copythat provides visible feedback appropriate for a compact macOS utility panel
+
+### Requirement: Select cards responsively
+Copythat SHALL keep bottom-panel card selection responsive when users browse visible cards with keyboard movement or mouse clicks.
+
+#### Scenario: User moves selection with keyboard
+- **WHEN** the user repeatedly sends left or right movement commands in the bottom panel
+- **THEN** Copythat updates the selected card without visible stutter
+- **AND** the selected-card border, shadow, scale, raised position, and scroll-to-center behavior remain visually consistent with the existing panel design
+
+#### Scenario: User clicks a card
+- **WHEN** the user single-clicks a visible card in the bottom panel
+- **THEN** Copythat selects that card promptly
+- **AND** clicking the already selected card does not trigger unnecessary selection updates
+
+#### Scenario: User double-clicks a card
+- **WHEN** the user double-clicks a visible card in the bottom panel
+- **THEN** Copythat still pastes the selected card
+
+### Requirement: Render selected cards without top clipping
+Copythat SHALL render selected bottom-panel history cards without clipping their top edge, header, source icon, selected border, or rounded corner.
+
+#### Scenario: Selected card uses raised visual treatment
+- **WHEN** the bottom panel displays visible history cards and one card is selected
+- **THEN** the selected card's top edge, header text, source icon, selected border, and rounded corner remain fully visible
+- **AND** the selected-card scale and raised positioning behavior remains unchanged
+
+#### Scenario: User browses selected cards horizontally
+- **WHEN** the user moves selection across visible text, image, URL, and file cards
+- **THEN** each newly selected card remains visually unclipped at the top of the timeline
+- **AND** horizontal scrolling continues to keep the selected card reachable without changing search, paste, or pinboard behavior
