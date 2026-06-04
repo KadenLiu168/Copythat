@@ -81,8 +81,6 @@ struct BottomPanelView: View {
                 .blur(radius: 0.5)
                 .offset(y: 1)
         }
-        .shadow(color: Color(red: 0.95, green: 0.47, blue: 0.10).opacity(0.44), radius: 28, y: 16)
-        .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
         .compositingGroup()
     }
 
@@ -258,7 +256,6 @@ struct BottomPanelView: View {
                                 item: item,
                                 pinboards: settings.customPinboards,
                                 isSelected: item.id == store.selectedItem?.id,
-                                sourceLogoIcon: store.sourceIconByApp[item.sourceApp],
                                 onSelect: { store.select(item) },
                                 onPaste: onPaste,
                                 onTogglePin: { store.togglePin(item) },

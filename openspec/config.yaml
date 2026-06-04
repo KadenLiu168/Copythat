@@ -1,0 +1,24 @@
+schema: spec-driven
+
+context: |
+  Project: Copythat, a native macOS clipboard history app.
+  Tech stack: SwiftPM executable package, Swift 5.10, macOS 14, SwiftUI with narrow AppKit/CoreGraphics boundaries.
+  Product shape: menu bar resident app, global shortcut, bottom floating panel, search, pinned items, custom pinboards, and text, URL, image, and file capture.
+  Architecture: keep SwiftUI Views focused on presentation and user actions. Put pasteboard parsing, source attribution, paste execution, window control, accessibility checks, and other AppKit/CoreGraphics boundaries in Services or Support.
+  Domain constraints: source tracking is non-persistent and should use ClipboardItem.sourceApp and sourceAppIconData. Source resolution belongs in CopySourceTracker and CopySourceResolution.
+  UI constraints: keep UI native to macOS. Prefer system materials, semantic colors, system accent color, and compact controls over fixed custom palettes.
+  Verification: run swift build and ./script/verify_all.sh for implementation changes. Manual checks are still required for Accessibility access, global shortcut registration, Launch at login, panel UI, search, pinboards, horizontal scrolling, paste flow, and physical multi-display behavior.
+  Terminology: preserve real domain terms such as paste, pasteboard, copy, cut, and source. Do not mechanically rename them away.
+
+rules:
+  proposal:
+    - Always include a Non-goals section.
+    - Keep the motivation and impact tied to user-visible Copythat behavior.
+  specs:
+    - Describe user-observable behavior, not implementation details, unless the behavior depends on AppKit, CoreGraphics, pasteboard, accessibility, window management, or persistence boundaries.
+    - Each requirement must include at least one scenario.
+  design:
+    - Include a design artifact only for changes that cross modules or affect permissions, persistence, pasteboard behavior, source attribution, window management, or global shortcuts.
+  tasks:
+    - Include verification steps for each implementation task.
+    - Implementation changes should be verified with swift build and ./script/verify_all.sh unless the task is documentation-only.

@@ -15,6 +15,65 @@ APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 ENTITLEMENTS="$ROOT_DIR/Copythat.entitlements"
+DEFAULT_SIGN_IDENTITY="Copythat Local Code Signing"
+SIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+
+if [ -z "$SIGN_IDENTITY" ] &&
+   security find-identity -p codesigning -v | grep -Fq "$DEFAULT_SIGN_IDENTITY"; then
+  SIGN_IDENTITY="$DEFAULT_SIGN_IDENTITY"
+fi
+
+signing_identity() {
+  if [ -n "$SIGN_IDENTITY" ] && [ "$SIGN_IDENTITY" != "-" ]; then
+    echo "$SIGN_IDENTITY"
+  else
+    echo "-"
+  fi
+}
+
+signing_label() {
+  if [ -n "$SIGN_IDENTITY" ] && [ "$SIGN_IDENTITY" != "-" ]; then
+    echo "$SIGN_IDENTITY"
+  else
+    echo "ad hoc"
+  fi
+}
+
+validate_signing_identity() {
+  if [ -z "$SIGN_IDENTITY" ] || [ "$SIGN_IDENTITY" = "-" ]; then
+    return
+  fi
+
+  if ! security find-identity -p codesigning -v | grep -Fq "$SIGN_IDENTITY"; then
+    echo "Code signing identity not found: $SIGN_IDENTITY" >&2
+    echo "Create a local Code Signing certificate, or unset CODESIGN_IDENTITY to use ad hoc signing." >&2
+    exit 1
+  fi
+}
+
+sign_app() {
+  validate_signing_identity
+
+  local identity
+  identity="$(signing_identity)"
+
+  if [ -f "$ENTITLEMENTS" ]; then
+    codesign --force --sign "$identity" --options runtime --entitlements "$ENTITLEMENTS" "$APP_BUNDLE" >/dev/null
+  else
+    codesign --force --sign "$identity" --options runtime "$APP_BUNDLE" >/dev/null
+  fi
+
+  echo "Signed $APP_BUNDLE with $(signing_label) signing."
+}
+
+verify_signature() {
+  if [ ! -d "$APP_BUNDLE" ]; then
+    echo "$APP_BUNDLE does not exist. Run ./script/build_and_run.sh first." >&2
+    exit 1
+  fi
+
+  codesign -dvvv "$APP_BUNDLE" 2>&1
+}
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
@@ -65,9 +124,7 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-if [ -f "$ENTITLEMENTS" ]; then
-  codesign --force --sign - --options runtime --entitlements "$ENTITLEMENTS" "$APP_BUNDLE" >/dev/null
-fi
+sign_app
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
@@ -116,7 +173,7 @@ guard CommandLine.arguments.count == 2,
     fatalError("missing Copythat pid")
 }
 
-let deadline = Date().addingTimeInterval(8)
+let deadline = Date().addingTimeInterval(20)
 var panel: [String: Any]?
 
 repeat {
@@ -140,8 +197,11 @@ guard let panel else {
 print("panel ok", panel[kCGWindowBounds as String] ?? [:])
 SWIFT
     ;;
+  --verify-signature|verify-signature)
+    verify_signature
+    ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--verify-panel]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--verify-panel|--verify-signature]" >&2
     exit 2
     ;;
 esac

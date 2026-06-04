@@ -12,6 +12,40 @@ Use the Codex Run action, or run:
 
 The script builds the SwiftPM app, stages `dist/Copythat.app`, and opens it as a menu bar resident app.
 
+### Local signing for Accessibility testing
+
+`dist/Copythat.app` uses ad hoc signing by default. That is enough to launch the app, but macOS Accessibility trust can be unstable across rebuilds because the ad hoc code hash changes.
+
+For local development, create a self-signed Code Signing certificate in Keychain Access:
+
+1. Open Keychain Access.
+2. Choose Keychain Access > Certificate Assistant > Create a Certificate.
+3. Set Name to `Copythat Local Code Signing`.
+4. Set Identity Type to `Self Signed Root`.
+5. Set Certificate Type to `Code Signing`.
+6. Create it in the `login` keychain and set it to Always Trust if macOS asks.
+
+After this certificate exists, `./script/build_and_run.sh` automatically uses it. You can also set the identity explicitly:
+
+```sh
+export CODESIGN_IDENTITY="Copythat Local Code Signing"
+./script/build_and_run.sh
+```
+
+To force the old ad hoc fallback for comparison:
+
+```sh
+CODESIGN_IDENTITY=- ./script/build_and_run.sh
+```
+
+To inspect the staged app signature:
+
+```sh
+./script/build_and_run.sh --verify-signature
+```
+
+If you switch from ad hoc signing to local signing, remove the old Copythat entry from System Settings > Privacy & Security > Accessibility once, rebuild with `CODESIGN_IDENTITY`, grant Accessibility to `dist/Copythat.app`, rebuild again, then retry double-click or Return paste. The repeated permission prompt should stop as long as the app path, bundle identifier, and signing identity stay stable.
+
 ## Development Guidelines
 
 - Keep UI native to macOS: prefer system materials, semantic colors, system accent color, and compact controls over fixed custom palettes.

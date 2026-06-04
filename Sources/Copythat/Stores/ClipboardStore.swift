@@ -8,7 +8,6 @@ import UniformTypeIdentifiers
 final class ClipboardStore: ObservableObject {
     @Published private(set) var items: [ClipboardItem] = []
     @Published private(set) var filteredItems: [ClipboardItem] = []
-    @Published private(set) var sourceIconByApp: [String: NSImage] = [:]
     @Published var selectedID: UUID?
     @Published var searchText = "" {
         didSet { refreshFilteredItems() }
@@ -410,14 +409,6 @@ final class ClipboardStore: ObservableObject {
             let searchMatches = query.isEmpty || item.searchText.contains(query)
             return boardMatches && searchMatches
         }
-
-        var icons: [String: NSImage] = [:]
-        for item in filteredItems where icons[item.sourceApp] == nil {
-            if let icon = item.sourceAppIcon {
-                icons[item.sourceApp] = icon
-            }
-        }
-        sourceIconByApp = icons
     }
 
     private func saveItems() {
