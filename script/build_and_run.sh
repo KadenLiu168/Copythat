@@ -13,6 +13,7 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
+APP_RESOURCE_BUNDLE="$APP_RESOURCES/${APP_NAME}_${APP_NAME}.bundle"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 ENTITLEMENTS="$ROOT_DIR/Copythat.entitlements"
 DEFAULT_SIGN_IDENTITY="Copythat Local Code Signing"
@@ -66,6 +67,13 @@ sign_app() {
   echo "Signed $APP_BUNDLE with $(signing_label) signing."
 }
 
+verify_resource_bundle() {
+  if [ ! -f "$APP_RESOURCE_BUNDLE/MenuBarIconTemplate.png" ]; then
+    echo "Missing SwiftPM resource bundle at $APP_RESOURCE_BUNDLE" >&2
+    exit 1
+  fi
+}
+
 verify_signature() {
   if [ ! -d "$APP_BUNDLE" ]; then
     echo "$APP_BUNDLE does not exist. Run ./script/build_and_run.sh first." >&2
@@ -73,6 +81,45 @@ verify_signature() {
   fi
 
   codesign -dvvv "$APP_BUNDLE" 2>&1
+}
+
+verify_portable_app() {
+  verify_resource_bundle
+
+  PORTABLE_DIR="$(mktemp -d -t copythat_portable_app)"
+  PORTABLE_APP="$PORTABLE_DIR/$APP_NAME.app"
+  PORTABLE_HIDDEN_RESOURCE=""
+
+  cleanup_portable_verify() {
+    pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+    if [ -n "$PORTABLE_HIDDEN_RESOURCE" ] && [ -d "$PORTABLE_HIDDEN_RESOURCE" ]; then
+      mv "$PORTABLE_HIDDEN_RESOURCE" "$RESOURCE_BUNDLE"
+    fi
+    rm -rf "$PORTABLE_DIR"
+  }
+  trap cleanup_portable_verify EXIT
+
+  cp -R "$APP_BUNDLE" "$PORTABLE_APP"
+
+  if [ -d "$RESOURCE_BUNDLE" ]; then
+    PORTABLE_HIDDEN_RESOURCE="$RESOURCE_BUNDLE.portable-hidden"
+    rm -rf "$PORTABLE_HIDDEN_RESOURCE"
+    mv "$RESOURCE_BUNDLE" "$PORTABLE_HIDDEN_RESOURCE"
+  fi
+
+  /usr/bin/open -n "$PORTABLE_APP"
+  for _ in {1..40}; do
+    if pgrep -x "$APP_NAME" >/dev/null; then
+      echo "portable app ok"
+      cleanup_portable_verify
+      trap - EXIT
+      return
+    fi
+    sleep 0.2
+  done
+
+  echo "Portable Copythat app did not launch without $RESOURCE_BUNDLE" >&2
+  exit 1
 }
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
@@ -92,8 +139,10 @@ if [ -f "$ROOT_DIR/Sources/Copythat/Resources/AppIcon.icns" ]; then
 fi
 
 if [ -d "$RESOURCE_BUNDLE" ]; then
-  cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCES/"
+  cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCE_BUNDLE"
 fi
+
+verify_resource_bundle
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -150,6 +199,9 @@ case "$MODE" in
     sleep 1
     pgrep -x "$APP_NAME" >/dev/null
     ;;
+  --verify-portable|verify-portable)
+    verify_portable_app
+    ;;
   --verify-panel|verify-panel)
     /usr/bin/open -n --env COPYTHAT_OPEN_PANEL_ON_LAUNCH=1 "$APP_BUNDLE"
     APP_PID=""
@@ -201,7 +253,7 @@ SWIFT
     verify_signature
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--verify-panel|--verify-signature]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--verify-portable|--verify-panel|--verify-signature]" >&2
     exit 2
     ;;
 esac

@@ -222,7 +222,7 @@ struct BottomPanelView: View {
 
     private var addButton: some View {
         CommandBarIconButton(systemName: "plus", fontSize: 16, helpText: "Open Settings") {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            (NSApp.delegate as? AppDelegate)?.openSettings(nil)
         }
     }
 

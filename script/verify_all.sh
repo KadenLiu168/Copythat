@@ -38,6 +38,7 @@ print("icons ok", sorted(found))
 PY
 
 ./script/build_and_run.sh --verify
+./script/build_and_run.sh --verify-portable
 ./script/build_and_run.sh --verify-panel
 
 python3 - <<'PY'
