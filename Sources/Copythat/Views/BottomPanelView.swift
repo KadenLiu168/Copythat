@@ -1,17 +1,29 @@
 import AppKit
 import SwiftUI
 
+private enum CommandBarMetrics {
+    static let hitSize: CGFloat = 32
+    static let visibleHeight: CGFloat = 26
+    static let cornerRadius: CGFloat = 10
+    static let compactSearchWidth: CGFloat = 32
+    static let expandedSearchWidth: CGFloat = 188
+    static let searchMotion = Animation.smooth(duration: 0.22)
+}
+
 struct BottomPanelView: View {
     private let panelCornerRadius: CGFloat = 26
-    private let settings: AppSettings
+    @ObservedObject private var settings: AppSettings
     @ObservedObject private var store: ClipboardStore
     @State private var searchExpanded = false
+    @State private var searchContentVisible = false
+    @State private var searchHovered = false
+    @State private var isCreatingPinboard = false
     @FocusState private var searchFocused: Bool
     let onClose: () -> Void
     let onPaste: () -> Void
 
     init(model: AppModel, onClose: @escaping () -> Void, onPaste: @escaping () -> Void) {
-        settings = model.settings
+        _settings = ObservedObject(wrappedValue: model.settings)
         _store = ObservedObject(wrappedValue: model.store)
         self.onClose = onClose
         self.onPaste = onPaste
@@ -21,17 +33,21 @@ struct BottomPanelView: View {
         panelContainer
             .onAppear {
                 searchExpanded = !store.searchText.isEmpty
+                searchContentVisible = !store.searchText.isEmpty
                 searchFocused = !store.searchText.isEmpty
                 store.selectFirstVisibleItem()
             }
             .onChange(of: store.searchText) {
+                if !store.searchText.isEmpty {
+                    searchContentVisible = true
+                } else if !searchExpanded {
+                    searchContentVisible = false
+                }
                 store.selectFirstVisibleItem()
             }
             .onChange(of: searchFocused) { _, isFocused in
                 guard !isFocused, store.searchText.isEmpty else { return }
-                withAnimation(.snappy(duration: 0.16)) {
-                    searchExpanded = false
-                }
+                collapseEmptySearch()
             }
             .onMoveCommand { direction in
                 switch direction {
@@ -43,7 +59,13 @@ struct BottomPanelView: View {
                     break
                 }
             }
-            .onExitCommand(perform: onClose)
+            .onExitCommand {
+                if isCreatingPinboard {
+                    isCreatingPinboard = false
+                } else {
+                    onClose()
+                }
+            }
     }
 
     private var panelContainer: some View {
@@ -118,83 +140,155 @@ struct BottomPanelView: View {
 
     private var header: some View {
         GeometryReader { proxy in
-            let searchWidth: CGFloat = searchExpanded || !store.searchText.isEmpty ? 188 : 32
-            let leftSpacing: CGFloat = 8
-            let sideReserve = max(160, searchWidth + 128)
-            let maxCenterWidth = max(80, proxy.size.width - sideReserve * 2)
+            let groupSpacing: CGFloat = 16
+            let searchExpansionReserve = CommandBarMetrics.expandedSearchWidth - CommandBarMetrics.compactSearchWidth
+            let maxPinboardWidth = max(
+                80,
+                proxy.size.width - CommandBarMetrics.compactSearchWidth - CommandBarMetrics.hitSize - groupSpacing * 2 - searchExpansionReserve * 2
+            )
 
-            ZStack {
-                HStack(spacing: leftSpacing) {
-                    searchControl
-                        .frame(width: searchWidth, alignment: .leading)
-                    pinboardButton(for: .all)
-                        .frame(height: 32)
-                    Spacer(minLength: 0)
-                    addButton
-                        .frame(width: 32, height: 32)
+            ViewThatFits(in: .horizontal) {
+                commandBarGroup(spacing: groupSpacing) {
+                    pinboardContent(for: headerPinboards, spacing: 8)
                 }
 
-                centerPinboardStrip(maxWidth: maxCenterWidth)
-                    .frame(maxWidth: maxCenterWidth)
+                commandBarGroup(spacing: groupSpacing) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        pinboardContent(for: headerPinboards, spacing: 8)
+                    }
+                    .frame(width: maxPinboardWidth)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(height: 36)
     }
 
-    @ViewBuilder
     private var searchControl: some View {
-        if searchExpanded || !store.searchText.isEmpty {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(CopythatFont.font(size: 13, weight: .medium))
-                    .foregroundStyle(Color(red: 0.20, green: 0.18, blue: 0.15).opacity(0.76))
-                TextField("Search", text: $store.searchText)
-                    .textFieldStyle(.plain)
-                    .font(CopythatFont.font(size: 13, weight: .medium))
-                    .foregroundStyle(Color(red: 0.16, green: 0.14, blue: 0.12))
-                    .focused($searchFocused)
-                    .onSubmit(onPaste)
-                if !store.searchText.isEmpty {
-                    Button {
-                        store.searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(CopythatFont.font(size: 12, weight: .medium))
-                            .foregroundStyle(Color(red: 0.20, green: 0.18, blue: 0.15).opacity(0.42))
-                    }
-                    .buttonStyle(.plain)
-                }
+        let isExpanded = isSearchPresented
+        let contentVisible = searchContentVisible || !store.searchText.isEmpty
+        let searchWidth = isExpanded ? CommandBarMetrics.expandedSearchWidth : CommandBarMetrics.compactSearchWidth
+
+        return HStack(spacing: isExpanded ? 8 : 0) {
+            Image(systemName: "magnifyingglass")
+                .font(CopythatFont.font(size: isExpanded ? 13 : 15, weight: .medium))
+                .foregroundStyle(Color(red: 0.20, green: 0.18, blue: 0.15).opacity(0.76))
+                .frame(width: CommandBarMetrics.compactSearchWidth, height: CommandBarMetrics.visibleHeight)
+
+            if isExpanded {
+                searchFieldContent(contentVisible: contentVisible)
             }
-            .padding(.horizontal, 11)
-            .frame(height: 32)
-            .background(Color.white.opacity(searchFocused ? 0.52 : 0.36), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(searchFocused ? Color(red: 0.22, green: 0.19, blue: 0.15).opacity(0.24) : .white.opacity(0.48), lineWidth: 1)
+        }
+        .padding(.trailing, isExpanded ? 11 : 0)
+        .frame(width: searchWidth, height: CommandBarMetrics.visibleHeight)
+        .background(
+            Color.white.opacity(searchBackgroundOpacity),
+            in: RoundedRectangle(cornerRadius: CommandBarMetrics.cornerRadius, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: CommandBarMetrics.cornerRadius, style: .continuous)
+                .stroke(searchBorderColor, lineWidth: 1)
+        }
+        .shadow(
+            color: Color(red: 0.44, green: 0.25, blue: 0.12).opacity(searchFocused ? 0.12 : 0.06),
+            radius: searchFocused ? 8 : 4,
+            y: 2
+        )
+        .frame(height: CommandBarMetrics.hitSize)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: expandSearch)
+        .onHover { hovering in
+            withAnimation(.snappy(duration: 0.14)) {
+                searchHovered = hovering
             }
-            .shadow(color: Color(red: 0.44, green: 0.25, blue: 0.12).opacity(searchFocused ? 0.12 : 0.06), radius: searchFocused ? 8 : 4, y: 2)
-            .animation(.snappy(duration: 0.16), value: searchFocused)
-        } else {
-            CommandBarIconButton(systemName: "magnifyingglass", fontSize: 15, helpText: "Search") {
-                withAnimation(.snappy(duration: 0.16)) {
-                    searchExpanded = true
+        }
+        .help("Search")
+        .animation(CommandBarMetrics.searchMotion, value: isExpanded)
+        .animation(.smooth(duration: 0.12).delay(contentVisible ? 0.06 : 0), value: contentVisible)
+    }
+
+    private func searchFieldContent(contentVisible: Bool) -> some View {
+        HStack(spacing: 8) {
+            TextField("Search", text: $store.searchText)
+                .textFieldStyle(.plain)
+                .font(CopythatFont.font(size: 13, weight: .medium))
+                .foregroundStyle(Color(red: 0.16, green: 0.14, blue: 0.12))
+                .focused($searchFocused)
+                .onSubmit(onPaste)
+                .opacity(contentVisible ? 1 : 0)
+
+            if !store.searchText.isEmpty {
+                Button {
+                    store.searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(CopythatFont.font(size: 12, weight: .medium))
+                        .foregroundStyle(Color(red: 0.20, green: 0.18, blue: 0.15).opacity(0.42))
                 }
-                DispatchQueue.main.async {
-                    searchFocused = true
-                }
+                .buttonStyle(.plain)
+                .opacity(contentVisible ? 1 : 0)
             }
         }
     }
 
-    private func centerPinboardStrip(maxWidth: CGFloat) -> some View {
-        ViewThatFits(in: .horizontal) {
-            pinboardContent(for: centerPinboards, spacing: 12)
+    private var searchBackgroundOpacity: Double {
+        if searchFocused {
+            return 0.52
+        }
+        if searchHovered {
+            return 0.38
+        }
+        return isSearchPresented ? 0.36 : 0.22
+    }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                pinboardContent(for: centerPinboards, spacing: 12)
+    private var searchBorderColor: Color {
+        if searchFocused {
+            return Color(red: 0.22, green: 0.19, blue: 0.15).opacity(0.24)
+        }
+        return .white.opacity(searchHovered ? 0.48 : 0.28)
+    }
+
+    private var isSearchPresented: Bool {
+        searchExpanded || !store.searchText.isEmpty
+    }
+
+    private func expandSearch() {
+        guard !isSearchPresented else { return }
+        withAnimation(CommandBarMetrics.searchMotion) {
+            searchExpanded = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.055) {
+            guard isSearchPresented else { return }
+            withAnimation(.smooth(duration: 0.12)) {
+                searchContentVisible = true
             }
-            .frame(width: maxWidth)
-            .scrollClipDisabled()
+        }
+        DispatchQueue.main.async {
+            searchFocused = true
+        }
+    }
+
+    private func collapseEmptySearch() {
+        guard store.searchText.isEmpty else { return }
+        withAnimation(.smooth(duration: 0.10)) {
+            searchContentVisible = false
+        }
+        withAnimation(CommandBarMetrics.searchMotion) {
+            searchExpanded = false
+        }
+    }
+
+    private func commandBarGroup<PinboardStrip: View>(
+        spacing: CGFloat,
+        @ViewBuilder pinboardStrip: () -> PinboardStrip
+    ) -> some View {
+        HStack(spacing: spacing) {
+            searchControl
+                .frame(width: CommandBarMetrics.compactSearchWidth, height: CommandBarMetrics.hitSize, alignment: .trailing)
+                .zIndex(1)
+            pinboardStrip()
+            addButton
+                .frame(width: CommandBarMetrics.hitSize, height: CommandBarMetrics.hitSize)
         }
     }
 
@@ -204,7 +298,7 @@ struct BottomPanelView: View {
                 pinboardButton(for: board)
             }
         }
-        .frame(height: 32)
+        .frame(height: CommandBarMetrics.hitSize)
     }
 
     private func pinboardButton(for board: Pinboard) -> some View {
@@ -216,13 +310,25 @@ struct BottomPanelView: View {
             dotColor: pinboardDotColor(for: board),
             isSelected: isSelected
         ) {
+            dismissEmptySearch()
             store.selectedBoardID = board.id
         }
     }
 
     private var addButton: some View {
-        CommandBarIconButton(systemName: "plus", fontSize: 16, helpText: "Open Settings") {
-            (NSApp.delegate as? AppDelegate)?.openSettings(nil)
+        CommandBarIconButton(systemName: "plus", fontSize: 16, helpText: "New Pinboard") {
+            dismissEmptySearch()
+            isCreatingPinboard = true
+        }
+        .popover(isPresented: $isCreatingPinboard, arrowEdge: .top) {
+            NewPinboardPopover(
+                settings: settings,
+                onCancel: { isCreatingPinboard = false },
+                onCreate: { pinboard in
+                    isCreatingPinboard = false
+                    store.selectedBoardID = Pinboard.custom(pinboard.name).id
+                }
+            )
         }
     }
 
@@ -260,9 +366,7 @@ struct BottomPanelView: View {
             .frame(maxHeight: .infinity, alignment: .center)
             .onChange(of: store.selectedID) { _, id in
                 guard let id else { return }
-                withAnimation(.snappy(duration: 0.18)) {
-                    proxy.scrollTo(id, anchor: .center)
-                }
+                proxy.scrollTo(id, anchor: .center)
             }
         }
     }
@@ -326,8 +430,8 @@ struct BottomPanelView: View {
         .lineLimit(1)
     }
 
-    private var centerPinboards: [Pinboard] {
-        [Pinboard.pinned] + settings.customPinboards.map { Pinboard.custom($0) }
+    private var headerPinboards: [Pinboard] {
+        [Pinboard.all, Pinboard.pinned] + settings.customPinboards.map { Pinboard.custom($0.name) }
     }
 
     private func displayTitle(for board: Pinboard) -> String {
@@ -339,16 +443,10 @@ struct BottomPanelView: View {
         case .all:
             return Color(red: 0.32, green: 0.29, blue: 0.24)
         case .pinned:
-            return Color(red: 1.0, green: 0.24, blue: 0.22)
+            return Color(nsColor: .systemRed)
         case .custom:
-            let palette = [
-                Color(red: 0.96, green: 0.70, blue: 0.02),
-                Color(red: 0.10, green: 0.70, blue: 0.34),
-                Color(red: 0.06, green: 0.52, blue: 0.93),
-                Color(red: 0.96, green: 0.32, blue: 0.52)
-            ]
-            let index = settings.customPinboards.firstIndex(of: board.customName ?? "") ?? 0
-            return palette[index % palette.count]
+            let pinboard = settings.customPinboards.first { $0.name == board.customName }
+            return Color(nsColor: pinboard?.color.color ?? PinboardColorToken.amber.color)
         case .unknown:
             return Color(red: 0.32, green: 0.29, blue: 0.24)
         }
@@ -359,6 +457,83 @@ struct BottomPanelView: View {
         if let url {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    private func dismissEmptySearch() {
+        guard store.searchText.isEmpty else {
+            searchFocused = false
+            return
+        }
+        searchFocused = false
+        collapseEmptySearch()
+    }
+}
+
+private struct NewPinboardPopover: View {
+    @ObservedObject var settings: AppSettings
+    let onCancel: () -> Void
+    let onCreate: (CustomPinboard) -> Void
+    @State private var name = ""
+    @State private var selectedColor = PinboardColorToken.amber
+    @FocusState private var nameFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New Pinboard")
+                .font(CopythatFont.font(size: 15, weight: .semibold))
+
+            TextField("Pinboard name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($nameFocused)
+                .onSubmit(create)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Color")
+                    .font(CopythatFont.font(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    ForEach(PinboardColorToken.allCases) { color in
+                        Button {
+                            selectedColor = color
+                        } label: {
+                            Circle()
+                                .fill(Color(nsColor: color.color))
+                                .frame(width: 20, height: 20)
+                                .padding(3)
+                                .overlay {
+                                    Circle()
+                                        .stroke(.primary.opacity(selectedColor == color ? 0.62 : 0), lineWidth: 1.5)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .help(color.rawValue.capitalized)
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Create", action: create)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!settings.canCreateCustomPinboard(named: name))
+            }
+        }
+        .padding(16)
+        .frame(width: 250)
+        .onAppear {
+            DispatchQueue.main.async {
+                nameFocused = true
+            }
+        }
+        .onExitCommand(perform: onCancel)
+    }
+
+    private func create() {
+        guard let pinboard = settings.createCustomPinboard(name: name, color: selectedColor) else { return }
+        onCreate(pinboard)
     }
 }
 
@@ -374,7 +549,7 @@ private struct CommandBarIconButton: View {
             Image(systemName: systemName)
                 .font(CopythatFont.font(size: fontSize, weight: .medium))
                 .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.12))
-                .frame(width: 32, height: 32)
+                .frame(width: CommandBarMetrics.hitSize, height: CommandBarMetrics.hitSize)
         }
         .buttonStyle(CommandBarIconButtonStyle(isHovered: isHovered))
         .onHover { hovering in
@@ -392,12 +567,14 @@ private struct CommandBarIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: CommandBarMetrics.cornerRadius, style: .continuous)
                     .fill(Color.white.opacity(backgroundOpacity(isPressed: configuration.isPressed)))
+                    .frame(width: CommandBarMetrics.hitSize, height: CommandBarMetrics.visibleHeight)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: CommandBarMetrics.cornerRadius, style: .continuous)
                     .stroke(.white.opacity(isHovered ? 0.48 : 0.28), lineWidth: 1)
+                    .frame(width: CommandBarMetrics.hitSize, height: CommandBarMetrics.visibleHeight)
             }
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .shadow(
@@ -425,7 +602,7 @@ private struct PinboardFilterButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 marker
 
                 Text(title)
@@ -451,14 +628,9 @@ private struct PinboardFilterButton: View {
                 .font(CopythatFont.font(size: 11.5, weight: .semibold))
                 .foregroundStyle(Color(red: 0.22, green: 0.20, blue: 0.17).opacity(isSelected ? 0.70 : 0.56))
         } else {
-            Capsule(style: .continuous)
-                .fill(dotColor.opacity(isSelected ? 0.95 : 0.72))
-                .frame(width: 11, height: 4.5)
-                .overlay(alignment: .top) {
-                    Capsule(style: .continuous)
-                        .fill(.white.opacity(isSelected ? 0.34 : 0.22))
-                        .frame(height: 1)
-                }
+            Circle()
+                .fill(dotColor)
+                .frame(width: 10, height: 10)
         }
     }
 }

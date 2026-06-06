@@ -29,7 +29,7 @@ final class ClipboardStore: ObservableObject {
         self.settings = settings
         self.sourceTracker = sourceTracker
         lastChangeCount = pasteboard.changeCount
-        items = initialItems ?? ClipboardHistoryPersistence.loadItems().map(\.storageOptimized)
+        items = initialItems ?? ClipboardHistoryPersistence.loadItems()
         refreshFilteredItems()
     }
 

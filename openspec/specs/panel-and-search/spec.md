@@ -139,25 +139,110 @@ Copythat SHALL show useful status information at the bottom of the panel.
 - **THEN** Copythat shows that message in the panel footer
 - **AND** offers an action to open Accessibility settings
 
+### Requirement: Create custom pinboards from the panel
+Copythat SHALL let users create a named, colored custom pinboard from the bottom-panel `+` control.
+
+#### Scenario: User opens pinboard creation
+- **WHEN** the user activates the bottom-panel `+` control
+- **THEN** Copythat shows a compact creation form associated with that control
+- **AND** the form provides a pinboard name field and a fixed set of color choices
+- **AND** Copythat does not open Settings
+
+#### Scenario: User creates a valid pinboard
+- **WHEN** the user enters a non-empty trimmed name that is not already used by a custom pinboard, selects a color, and confirms creation
+- **THEN** Copythat creates the custom pinboard with that name and color
+- **AND** the new pinboard appears in the panel immediately
+- **AND** the new pinboard becomes the selected filter
+- **AND** no clipboard item is automatically moved into the new pinboard
+
+#### Scenario: User enters an invalid pinboard name
+- **WHEN** the entered pinboard name is empty after trimming or exactly matches an existing trimmed custom pinboard name
+- **THEN** Copythat does not allow the pinboard to be created
+
+#### Scenario: User cancels pinboard creation
+- **WHEN** the user cancels the creation form or presses Escape while it is active
+- **THEN** Copythat dismisses the creation form without creating a pinboard
+- **AND** pressing Escape may close the bottom panel
+
+#### Scenario: User confirms with the keyboard
+- **WHEN** the creation form contains a valid name and the user presses Return
+- **THEN** Copythat creates the pinboard
+- **AND** Copythat does not paste the selected clipboard item
+
+### Requirement: Display stable custom pinboard colors
+Copythat SHALL display each custom pinboard using its persisted selected color from a fixed, visually consistent palette.
+
+#### Scenario: Color choices are displayed
+- **WHEN** the pinboard creation form is visible
+- **THEN** Copythat offers a small fixed set of distinct color choices
+- **AND** the choices have consistent perceived saturation and brightness
+
+#### Scenario: Custom pinboard is displayed
+- **WHEN** a custom pinboard filter is visible
+- **THEN** its category marker uses the color selected when the pinboard was created
+
+#### Scenario: Multiple pinboards use the same color
+- **WHEN** a user selects a color already used by another custom pinboard
+- **THEN** Copythat allows the new pinboard to use that color
+
 ### Requirement: Display a clear panel command bar
-Copythat SHALL present the bottom panel header as a compact command bar that visually separates search, pinboard filtering, and the add/settings action without changing their behavior.
+Copythat SHALL present the bottom panel header as one compact centered command group containing search, pinboard filtering, and the add-pinboard action without changing search or filtering behavior. The search control, pinboard filters, and add-pinboard control SHALL share a consistent compact visible height. Non-Clipboard pinboard filters SHALL use vivid circular category markers that preserve their configured colors.
 
 #### Scenario: Panel header displays default controls
 - **WHEN** the bottom panel is visible and search is not expanded
-- **THEN** the header shows a compact search control on the left
-- **AND** shows the available pinboard filters as a grouped horizontal control in the center
-- **AND** shows a compact add/settings control on the right
+- **THEN** the header shows search, Clipboard, the available pinboard filters, and add-pinboard together as one horizontally centered command group
+- **AND** Clipboard appears within the pinboard filter group
+- **AND** the gap between command groups is visibly larger than the gap between individual pinboard filters
+- **AND** the visible height of search, pinboard filters, and add-pinboard appears consistent
+
+#### Scenario: Pinboard categories show vivid circular markers
+- **WHEN** Pinned and custom pinboard filters are visible
+- **THEN** each filter shows a compact circular category marker
+- **AND** the category markers have stronger visual presence than the previous compact marker size
+- **AND** each custom pinboard marker uses its configured color
+- **AND** the Clipboard filter continues to use its history icon
+
+#### Scenario: Category markers remain vivid across filter states
+- **WHEN** a non-Clipboard pinboard filter is selected or unselected
+- **THEN** its circular category marker retains a strongly saturated appearance
+- **AND** selection remains visually distinct without relying on muting the category marker
+
+#### Scenario: Category markers adapt to appearance
+- **WHEN** Copythat is displayed in Aqua or Dark Aqua
+- **THEN** the category markers remain clear and visually consistent with macOS
 
 #### Scenario: Selected pinboard remains clear
 - **WHEN** a pinboard filter is selected
 - **THEN** the selected filter is visually distinct from unselected filters
 - **AND** the selected state does not visually dominate the clipboard item cards
 
+#### Scenario: Search expands left without moving adjacent controls
+- **WHEN** the user expands the compact search control
+- **THEN** the search field's right edge remains anchored at the compact search position
+- **AND** the additional search-field width extends to the left
+- **AND** the pinboard filters and add-pinboard control remain in the same positions
+
+#### Scenario: Search expands with natural motion
+- **WHEN** the user expands or collapses search
+- **THEN** the search control animates as a continuous pill rather than a hard replacement
+- **AND** the animation is smooth and has no visible rebound
+- **AND** search text and the clear button appear only after the field begins expanding
+
 #### Scenario: Search expands without breaking header layout
 - **WHEN** the user expands search or enters a search query
-- **THEN** the search field remains in the left command bar area
-- **AND** the pinboard filters remain horizontally scrollable when space is constrained
-- **AND** the add/settings control remains available on the right
+- **THEN** the complete command group remains within the available header width
+- **AND** the pinboard filter group remains horizontally scrollable when space is constrained
+- **AND** search and the add-pinboard control remain available
+
+#### Scenario: Empty search collapses after another command-bar action
+- **WHEN** search is expanded with an empty query and the user activates a pinboard filter or add-pinboard
+- **THEN** the search field loses focus and returns to its compact state
+- **AND** the activated command-bar action still completes
+
+#### Scenario: Active query remains visible after another command-bar action
+- **WHEN** search contains a query and the user activates another command-bar control
+- **THEN** the search field remains expanded with the query visible
+- **AND** the query continues to filter clipboard items
 
 #### Scenario: Header controls provide interaction feedback
 - **WHEN** the user hovers, presses, or focuses a top command bar control
@@ -168,7 +253,7 @@ Copythat SHALL keep bottom-panel card selection responsive when users browse vis
 
 #### Scenario: User moves selection with keyboard
 - **WHEN** the user repeatedly sends left or right movement commands in the bottom panel
-- **THEN** Copythat updates the selected card without visible stutter
+- **THEN** Copythat updates the selected card without visible stutter or accumulating scroll delay
 - **AND** the selected-card border, shadow, scale, raised position, and scroll-to-center behavior remain visually consistent with the existing panel design
 
 #### Scenario: User clicks a card
@@ -179,6 +264,10 @@ Copythat SHALL keep bottom-panel card selection responsive when users browse vis
 #### Scenario: User double-clicks a card
 - **WHEN** the user double-clicks a visible card in the bottom panel
 - **THEN** Copythat still pastes the selected card
+
+#### Scenario: User revisits cards with the same source icon
+- **WHEN** selection changes repeatedly between visible cards whose source appearance has already been rendered
+- **THEN** Copythat reuses the derived source appearance instead of repeatedly delaying selection feedback
 
 ### Requirement: Render selected cards without top clipping
 Copythat SHALL render selected bottom-panel history cards without clipping their top edge, header, source icon, selected border, or rounded corner.
@@ -192,3 +281,17 @@ Copythat SHALL render selected bottom-panel history cards without clipping their
 - **WHEN** the user moves selection across visible text, image, URL, and file cards
 - **THEN** each newly selected card remains visually unclipped at the top of the timeline
 - **AND** horizontal scrolling continues to keep the selected card reachable without changing search, paste, or pinboard behavior
+
+### Requirement: Display bounded image card previews
+Copythat SHALL display image history previews within the fixed card content region below the card header and SHALL preserve the complete image aspect ratio.
+
+#### Scenario: Ultra-wide image card is displayed
+- **WHEN** the panel displays an image history item with an ultra-wide aspect ratio
+- **THEN** the image preview remains inside the content region below the header
+- **AND** the card header, timestamp, and source icon remain fully visible
+- **AND** the complete image is shown proportionally without cropping
+
+#### Scenario: Other card kinds are displayed
+- **WHEN** the panel displays text, URL, or file history items
+- **THEN** their previews remain inside the same fixed content region
+- **AND** their existing preview presentation remains unchanged

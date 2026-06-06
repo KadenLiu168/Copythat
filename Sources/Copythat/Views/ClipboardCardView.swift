@@ -11,7 +11,7 @@ struct ClipboardCardView: View, Equatable {
         RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
     }
     let item: ClipboardItem
-    let pinboards: [String]
+    let pinboards: [CustomPinboard]
     let isSelected: Bool
     let onSelect: () -> Void
     let onPaste: () -> Void
@@ -46,7 +46,7 @@ struct ClipboardCardView: View, Equatable {
         .offset(y: isSelected ? -5 : 0)
         .zIndex(isSelected ? 1 : 0)
         .contentShape(cardShape)
-        .animation(.snappy(duration: 0.18), value: isSelected)
+        .animation(.snappy(duration: 0.10), value: isSelected)
         .onTapGesture(perform: selectForClick)
         .simultaneousGesture(
             TapGesture(count: 2)
@@ -59,8 +59,8 @@ struct ClipboardCardView: View, Equatable {
             Button(item.isPinned ? "Unpin" : "Pin", action: onTogglePin)
             if !pinboards.isEmpty {
                 Menu("Pinboard") {
-                    ForEach(pinboards, id: \.self) { name in
-                        Button(name) { onMoveToPinboard(name) }
+                    ForEach(pinboards) { pinboard in
+                        Button(pinboard.name) { onMoveToPinboard(pinboard.name) }
                     }
                     if item.pinboardName != nil {
                         Divider()
@@ -112,6 +112,8 @@ struct ClipboardCardView: View, Equatable {
                 textPreview
             }
         }
+        .frame(width: cardSize.width, height: cardSize.height - headerHeight)
+        .clipped()
     }
 
     @ViewBuilder
@@ -145,7 +147,7 @@ struct ClipboardCardView: View, Equatable {
         if let image = item.image {
             Image(nsImage: image)
                 .resizable()
-                .scaledToFill()
+                .scaledToFit()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .overlay(alignment: .bottom) {
@@ -283,7 +285,7 @@ struct ClipboardCardView: View, Equatable {
     }
 
     private var sourceAccentNSColor: NSColor {
-        SourceThemeColor.accent(icon: sourceIconForDisplay)
+        SourceThemeColor.accent(iconData: item.sourceAppIconData)
     }
 
     private var headerForeground: Color {

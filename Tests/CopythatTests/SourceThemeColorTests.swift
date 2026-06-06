@@ -37,6 +37,16 @@ struct SourceThemeColorTests {
 
         #expect(color.matches(SourceThemeColor.neutralAccent))
     }
+
+    @Test func iconDataAccentIsCached() throws {
+        let iconData = try #require(solidIcon(red: 0.88, green: 0.10, blue: 0.62).pngData(maxPixel: 32))
+
+        let first = SourceThemeColor.accent(iconData: iconData)
+        let second = SourceThemeColor.accent(iconData: iconData)
+
+        #expect(first === second)
+        #expect(first.isVivid)
+    }
 }
 
 private func solidIcon(red: CGFloat, green: CGFloat, blue: CGFloat) -> NSImage {

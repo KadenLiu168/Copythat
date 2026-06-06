@@ -46,15 +46,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Pinboards") {
-                TextEditor(text: $settings.pinboardsText)
-                    .font(CopythatFont.font(size: 13))
-                    .frame(height: 76)
-                Text("One pinboard name per line.")
-                    .font(CopythatFont.font(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Ignore Applications") {
                 TextEditor(text: $settings.ignoredApplications)
                     .font(CopythatFont.font(size: 13))

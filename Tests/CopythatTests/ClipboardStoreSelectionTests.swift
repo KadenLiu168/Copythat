@@ -44,6 +44,40 @@ struct ClipboardStoreSelectionTests {
         #expect(store.selectedID == nil)
     }
 
+    @Test func migratedPinboardNameKeepsAssignedItemsVisible() {
+        let defaults = temporaryDefaults()
+        defaults.set("Work", forKey: "pinboardsText")
+        let settings = AppSettings(defaults: defaults)
+        let assigned = item(text: "Assigned", pinboardName: "Work")
+        let store = ClipboardStore(
+            settings: settings,
+            sourceTracker: CopySourceTracker(),
+            initialItems: [assigned, item(text: "Other")]
+        )
+
+        store.selectedBoardID = Pinboard.custom(settings.customPinboards[0].name).id
+
+        #expect(store.filteredItems.map(\.id) == [assigned.id])
+        #expect(store.items.first(where: { $0.id == assigned.id })?.pinboardName == "Work")
+    }
+
+    @Test func creatingPinboardDoesNotAssignExistingItems() {
+        let defaults = temporaryDefaults()
+        defaults.set("", forKey: "pinboardsText")
+        let settings = AppSettings(defaults: defaults)
+        let existing = item(text: "Existing")
+        let store = ClipboardStore(
+            settings: settings,
+            sourceTracker: CopySourceTracker(),
+            initialItems: [existing]
+        )
+
+        let created = settings.createCustomPinboard(name: "Research", color: .pink)
+
+        #expect(created != nil)
+        #expect(store.items[0].pinboardName == nil)
+    }
+
     private func store(items: [ClipboardItem]) -> ClipboardStore {
         ClipboardStore(
             settings: AppSettings(),
@@ -52,7 +86,7 @@ struct ClipboardStoreSelectionTests {
         )
     }
 
-    private func item(text: String) -> ClipboardItem {
+    private func item(text: String, pinboardName: String? = nil) -> ClipboardItem {
         ClipboardItem(
             id: UUID(),
             kind: .text,
@@ -62,10 +96,17 @@ struct ClipboardStoreSelectionTests {
             sourceAppIconData: nil,
             createdAt: Date(),
             isPinned: false,
-            pinboardName: nil,
+            pinboardName: pinboardName,
             textValue: text,
             fileURLs: [],
             imageData: nil
         )
+    }
+
+    private func temporaryDefaults() -> UserDefaults {
+        let suiteName = "ClipboardStoreSelectionTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 }
