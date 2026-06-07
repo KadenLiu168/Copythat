@@ -127,6 +127,41 @@ Copythat SHALL filter visible history by all items, pinned items, or configured 
 - **WHEN** the user selects a custom pinboard
 - **THEN** Copythat shows history items assigned to that custom pinboard and matching the current search query
 
+#### Scenario: Pinned item is unpinned while viewing Pinned
+- **WHEN** the user unpins a visible item while the Pinned filter is selected
+- **THEN** Copythat removes that item from the visible timeline immediately
+- **AND** the visible item count updates without requiring the user to switch filters
+
+#### Scenario: Item is removed from current custom pinboard
+- **WHEN** the user removes a visible item from the selected custom pinboard
+- **THEN** Copythat removes that item from the visible timeline immediately
+- **AND** the visible item count updates without requiring the user to switch filters
+
+#### Scenario: Custom pinboard assignment does not pin an item
+- **WHEN** the user assigns an unpinned item to a custom pinboard
+- **THEN** Copythat keeps the item unpinned
+- **AND** the item does not appear in the Pinned filter unless the user pins it
+
+### Requirement: Present state-aware card actions
+Copythat SHALL present card actions that match each card's current pinned and pinboard state.
+
+#### Scenario: Unpinned card action
+- **WHEN** the user opens the context menu for an unpinned card
+- **THEN** Copythat shows a Pin action
+- **AND** Copythat does not show an Unpin action
+
+#### Scenario: Pinned card action
+- **WHEN** the user opens the context menu for a pinned card
+- **THEN** Copythat shows an Unpin action
+
+#### Scenario: Card assigned to custom pinboard
+- **WHEN** the user opens the context menu for a card assigned to a custom pinboard
+- **THEN** Copythat offers an action to remove the card from its pinboard
+
+#### Scenario: Card not assigned to custom pinboard
+- **WHEN** the user opens the context menu for a card without a custom pinboard assignment
+- **THEN** Copythat does not offer an action to remove the card from a pinboard
+
 ### Requirement: Show footer status and shortcuts
 Copythat SHALL show useful status information at the bottom of the panel.
 
@@ -168,6 +203,43 @@ Copythat SHALL let users create a named, colored custom pinboard from the bottom
 - **WHEN** the creation form contains a valid name and the user presses Return
 - **THEN** Copythat creates the pinboard
 - **AND** Copythat does not paste the selected clipboard item
+
+### Requirement: Delete custom pinboards from the panel
+Copythat SHALL let users delete custom pinboards from the bottom panel while preserving all clipboard history items.
+
+#### Scenario: Custom pinboard delete action is available
+- **WHEN** the user opens the context menu for a custom pinboard filter in the bottom panel
+- **THEN** Copythat shows an action to delete that custom pinboard
+
+#### Scenario: Built-in pinboards cannot be deleted
+- **WHEN** the user opens or uses the Clipboard or Pinned filter controls
+- **THEN** Copythat does not offer an action to delete those built-in pinboards
+
+#### Scenario: User cancels custom pinboard deletion
+- **WHEN** the user chooses to delete a custom pinboard and then cancels the confirmation
+- **THEN** Copythat keeps the custom pinboard
+- **AND** clips assigned to that pinboard remain assigned to it
+
+#### Scenario: User confirms custom pinboard deletion
+- **WHEN** the user confirms deletion of a custom pinboard
+- **THEN** Copythat removes that custom pinboard from the panel
+- **AND** Copythat does not delete any clipboard history items
+- **AND** clips assigned to the deleted pinboard are moved out of that pinboard
+
+#### Scenario: Deletion confirmation shows affected clips
+- **WHEN** Copythat asks the user to confirm deletion of a custom pinboard
+- **THEN** the confirmation identifies the pinboard by name
+- **AND** the confirmation states how many clips will be moved out of that pinboard
+
+#### Scenario: Current custom pinboard is deleted
+- **WHEN** the user confirms deletion of the currently selected custom pinboard
+- **THEN** Copythat selects the Clipboard filter
+- **AND** Copythat preserves the current search query
+
+#### Scenario: Non-selected custom pinboard is deleted
+- **WHEN** the user confirms deletion of a custom pinboard that is not the currently selected filter
+- **THEN** Copythat keeps the current filter selected
+- **AND** Copythat preserves the current search query
 
 ### Requirement: Display stable custom pinboard colors
 Copythat SHALL display each custom pinboard using its persisted selected color from a fixed, visually consistent palette.

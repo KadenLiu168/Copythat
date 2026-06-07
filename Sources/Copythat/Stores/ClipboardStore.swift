@@ -99,23 +99,41 @@ final class ClipboardStore: ObservableObject {
     func togglePin(_ item: ClipboardItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index].isPinned.toggle()
+        refreshFilteredItems()
         saveItems()
     }
 
     func move(_ item: ClipboardItem, toPinboard name: String?) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index].pinboardName = name
-        if name != nil {
-            items[index].isPinned = true
-        }
+        refreshFilteredItems()
         saveItems()
+    }
+
+    func pinboardAssignmentCount(named name: String) -> Int {
+        items.filter { $0.pinboardName == name }.count
+    }
+
+    func clearPinboardAssignments(named name: String) {
+        var didChange = false
+        for index in items.indices where items[index].pinboardName == name {
+            items[index].pinboardName = nil
+            didChange = true
+        }
+
+        guard didChange else { return }
+        refreshFilteredItems()
+        saveItems()
+    }
+
+    func selectClipboardIfViewingPinboard(named name: String) {
+        guard selectedBoardID == Pinboard.custom(name).id else { return }
+        selectedBoardID = Pinboard.all.id
     }
 
     func remove(_ item: ClipboardItem) {
         items.removeAll { $0.id == item.id }
-        if selectedID == item.id {
-            selectID(filteredItems.first?.id)
-        }
+        refreshFilteredItems()
         saveItems()
     }
 

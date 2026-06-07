@@ -18,6 +18,27 @@ INFO_PLIST="$APP_CONTENTS/Info.plist"
 ENTITLEMENTS="$ROOT_DIR/Copythat.entitlements"
 DEFAULT_SIGN_IDENTITY="Copythat Local Code Signing"
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+BUILD_CONFIGURATION="${COPYTHAT_BUILD_CONFIGURATION:-debug}"
+
+case "$BUILD_CONFIGURATION" in
+  debug)
+    ;;
+  release)
+    ;;
+  *)
+    echo "Unsupported COPYTHAT_BUILD_CONFIGURATION: $BUILD_CONFIGURATION" >&2
+    echo "Use debug or release." >&2
+    exit 2
+    ;;
+esac
+
+swift_build() {
+  if [ "$BUILD_CONFIGURATION" = "release" ]; then
+    swift build -c release "$@"
+  else
+    swift build "$@"
+  fi
+}
 
 if [ -z "$SIGN_IDENTITY" ] &&
    security find-identity -p codesigning -v | grep -Fq "$DEFAULT_SIGN_IDENTITY"; then
@@ -124,8 +145,8 @@ verify_portable_app() {
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
-swift build
-BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+swift_build
+BUILD_BINARY="$(swift_build --show-bin-path)/$APP_NAME"
 BUILD_DIR="$(dirname "$BUILD_BINARY")"
 RESOURCE_BUNDLE="$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle"
 

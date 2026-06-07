@@ -78,6 +78,123 @@ struct ClipboardStoreSelectionTests {
         #expect(store.items[0].pinboardName == nil)
     }
 
+    @Test func unpinningCurrentPinnedItemRefreshesVisibleItemsAndSelection() {
+        let first = item(text: "First", isPinned: true)
+        let second = item(text: "Second", isPinned: true)
+        let store = store(items: [first, second])
+        store.selectedBoardID = Pinboard.pinned.id
+        store.select(first)
+
+        store.togglePin(first)
+
+        #expect(store.items.first { $0.id == first.id }?.isPinned == false)
+        #expect(store.filteredItems.map(\.id) == [second.id])
+        #expect(store.selectedID == second.id)
+    }
+
+    @Test func unpinningOnlyPinnedItemClearsVisibleItemsAndSelection() {
+        let pinned = item(text: "Pinned", isPinned: true)
+        let store = store(items: [pinned])
+        store.selectedBoardID = Pinboard.pinned.id
+
+        store.togglePin(pinned)
+
+        #expect(store.filteredItems.isEmpty)
+        #expect(store.selectedID == nil)
+    }
+
+    @Test func removingCurrentCustomPinboardAssignmentRefreshesVisibleItemsAndSelection() {
+        let first = item(text: "First", pinboardName: "Work")
+        let second = item(text: "Second", pinboardName: "Work")
+        let store = store(items: [first, second])
+        store.selectedBoardID = Pinboard.custom("Work").id
+        store.select(first)
+
+        store.move(first, toPinboard: nil)
+
+        #expect(store.items.first { $0.id == first.id }?.pinboardName == nil)
+        #expect(store.filteredItems.map(\.id) == [second.id])
+        #expect(store.selectedID == second.id)
+    }
+
+    @Test func customPinboardAssignmentDoesNotChangePinnedState() {
+        let unpinned = item(text: "Unpinned")
+        let pinned = item(text: "Pinned", isPinned: true)
+        let store = store(items: [unpinned, pinned])
+
+        store.move(unpinned, toPinboard: "Work")
+        store.move(pinned, toPinboard: "Work")
+        store.move(pinned, toPinboard: nil)
+
+        #expect(store.items.first { $0.id == unpinned.id }?.pinboardName == "Work")
+        #expect(store.items.first { $0.id == unpinned.id }?.isPinned == false)
+        #expect(store.items.first { $0.id == pinned.id }?.pinboardName == nil)
+        #expect(store.items.first { $0.id == pinned.id }?.isPinned == true)
+    }
+
+    @Test func clearingPinboardAssignmentsMovesItemsOutWithoutDeletingOrUnpinning() {
+        let assigned = item(text: "Assigned", pinboardName: "Work", isPinned: true)
+        let otherAssigned = item(text: "Other assigned", pinboardName: "Ideas", isPinned: true)
+        let unassigned = item(text: "Unassigned")
+        let store = store(items: [assigned, otherAssigned, unassigned])
+
+        #expect(store.pinboardAssignmentCount(named: "Work") == 1)
+
+        store.clearPinboardAssignments(named: "Work")
+
+        #expect(store.items.map(\.id) == [assigned.id, otherAssigned.id, unassigned.id])
+        #expect(store.items.first { $0.id == assigned.id }?.pinboardName == nil)
+        #expect(store.items.first { $0.id == assigned.id }?.isPinned == true)
+        #expect(store.items.first { $0.id == otherAssigned.id }?.pinboardName == "Ideas")
+        #expect(store.items.first { $0.id == unassigned.id }?.pinboardName == nil)
+        #expect(store.pinboardAssignmentCount(named: "Work") == 0)
+    }
+
+    @Test func clearingPinboardAssignmentsRefreshesVisibleItemsAndPreservesSearch() {
+        let matching = item(text: "Alpha assigned", pinboardName: "Work")
+        let other = item(text: "Alpha other")
+        let store = store(items: [matching, other])
+        store.selectedBoardID = Pinboard.custom("Work").id
+        store.searchText = "alpha"
+
+        #expect(store.filteredItems.map(\.id) == [matching.id])
+
+        store.clearPinboardAssignments(named: "Work")
+
+        #expect(store.searchText == "alpha")
+        #expect(store.filteredItems.isEmpty)
+        #expect(store.selectedID == nil)
+        #expect(store.items.first { $0.id == matching.id }?.pinboardName == nil)
+    }
+
+    @Test func deletingCurrentPinboardFallsBackToClipboardAndPreservesSearch() {
+        let matching = item(text: "Alpha assigned", pinboardName: "Work")
+        let other = item(text: "Alpha other")
+        let store = store(items: [matching, other])
+        store.selectedBoardID = Pinboard.custom("Work").id
+        store.searchText = "alpha"
+
+        store.selectClipboardIfViewingPinboard(named: "Work")
+
+        #expect(store.selectedBoardID == Pinboard.all.id)
+        #expect(store.searchText == "alpha")
+        #expect(store.filteredItems.map(\.id) == [matching.id, other.id])
+    }
+
+    @Test func deletingNonSelectedPinboardKeepsCurrentFilterAndPreservesSearch() {
+        let work = item(text: "Alpha work", pinboardName: "Work")
+        let ideas = item(text: "Alpha ideas", pinboardName: "Ideas")
+        let store = store(items: [work, ideas])
+        store.selectedBoardID = Pinboard.custom("Ideas").id
+        store.searchText = "alpha"
+
+        store.selectClipboardIfViewingPinboard(named: "Work")
+
+        #expect(store.selectedBoardID == Pinboard.custom("Ideas").id)
+        #expect(store.searchText == "alpha")
+        #expect(store.filteredItems.map(\.id) == [ideas.id])
+    }
+
     private func store(items: [ClipboardItem]) -> ClipboardStore {
         ClipboardStore(
             settings: AppSettings(),
@@ -86,7 +203,7 @@ struct ClipboardStoreSelectionTests {
         )
     }
 
-    private func item(text: String, pinboardName: String? = nil) -> ClipboardItem {
+    private func item(text: String, pinboardName: String? = nil, isPinned: Bool = false) -> ClipboardItem {
         ClipboardItem(
             id: UUID(),
             kind: .text,
@@ -95,7 +212,7 @@ struct ClipboardStoreSelectionTests {
             sourceApp: "Tests",
             sourceAppIconData: nil,
             createdAt: Date(),
-            isPinned: false,
+            isPinned: isPinned,
             pinboardName: pinboardName,
             textValue: text,
             fileURLs: [],

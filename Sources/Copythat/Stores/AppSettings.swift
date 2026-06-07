@@ -110,6 +110,16 @@ final class AppSettings: ObservableObject {
             !customPinboards.contains(where: { $0.name == normalizedName })
     }
 
+    func deleteCustomPinboard(named name: String) -> Bool {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = customPinboards.firstIndex(where: { $0.name == normalizedName }) else {
+            return false
+        }
+
+        customPinboards.remove(at: index)
+        return true
+    }
+
     private func persistCustomPinboards() {
         guard let data = try? JSONEncoder().encode(customPinboards) else { return }
         defaults.set(data, forKey: Keys.customPinboards)

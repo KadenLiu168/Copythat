@@ -18,6 +18,7 @@ struct BottomPanelView: View {
     @State private var searchContentVisible = false
     @State private var searchHovered = false
     @State private var isCreatingPinboard = false
+    @State private var pinboardDeletionRequest: PinboardDeletionRequest?
     @FocusState private var searchFocused: Bool
     let onClose: () -> Void
     let onPaste: () -> Void
@@ -65,6 +66,25 @@ struct BottomPanelView: View {
                 } else {
                     onClose()
                 }
+            }
+            .alert(
+                "Delete \"\(pinboardDeletionRequest?.name ?? "")\"?",
+                isPresented: Binding(
+                    get: { pinboardDeletionRequest != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            pinboardDeletionRequest = nil
+                        }
+                    }
+                ),
+                presenting: pinboardDeletionRequest
+            ) { request in
+                Button("Delete", role: .destructive) {
+                    confirmPinboardDeletion(request)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { request in
+                Text(pinboardDeletionMessage(for: request))
             }
     }
 
@@ -308,7 +328,8 @@ struct BottomPanelView: View {
             board: board,
             title: displayTitle(for: board),
             dotColor: pinboardDotColor(for: board),
-            isSelected: isSelected
+            isSelected: isSelected,
+            onDelete: board.kind == .custom ? { requestPinboardDeletion(for: board) } : nil
         ) {
             dismissEmptySearch()
             store.selectedBoardID = board.id
@@ -467,6 +488,33 @@ struct BottomPanelView: View {
         searchFocused = false
         collapseEmptySearch()
     }
+
+    private func requestPinboardDeletion(for board: Pinboard) {
+        guard let name = board.customName else { return }
+        pinboardDeletionRequest = PinboardDeletionRequest(
+            name: name,
+            affectedClipCount: store.pinboardAssignmentCount(named: name)
+        )
+    }
+
+    private func confirmPinboardDeletion(_ request: PinboardDeletionRequest) {
+        guard settings.deleteCustomPinboard(named: request.name) else { return }
+        store.clearPinboardAssignments(named: request.name)
+        store.selectClipboardIfViewingPinboard(named: request.name)
+        pinboardDeletionRequest = nil
+    }
+
+    private func pinboardDeletionMessage(for request: PinboardDeletionRequest) -> String {
+        let clipLabel = request.affectedClipCount == 1 ? "clip" : "clips"
+        return "\(request.affectedClipCount) \(clipLabel) will be moved out of this pinboard."
+    }
+}
+
+private struct PinboardDeletionRequest: Identifiable {
+    let name: String
+    let affectedClipCount: Int
+
+    var id: String { name }
 }
 
 private struct NewPinboardPopover: View {
@@ -597,10 +645,22 @@ private struct PinboardFilterButton: View {
     let title: String
     let dotColor: Color
     let isSelected: Bool
+    let onDelete: (() -> Void)?
     let action: () -> Void
     @State private var isHovered = false
 
     var body: some View {
+        if let onDelete {
+            button
+                .contextMenu {
+                    Button("Delete Pinboard...", role: .destructive, action: onDelete)
+                }
+        } else {
+            button
+        }
+    }
+
+    private var button: some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 marker

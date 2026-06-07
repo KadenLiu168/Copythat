@@ -34,6 +34,22 @@ struct AppSettingsPinboardTests {
         #expect(relaunched.customPinboards.suffix(2).allSatisfy { $0.color == .violet })
     }
 
+    @Test func deletionRemovesPinboardPersistsAndRejectsMissingNames() throws {
+        let defaults = temporaryDefaults()
+        let settings = AppSettings(defaults: defaults)
+        let research = try #require(settings.createCustomPinboard(name: "Research", color: .violet))
+        let personal = try #require(settings.createCustomPinboard(name: "Personal", color: .pink))
+
+        #expect(settings.deleteCustomPinboard(named: " Research "))
+        #expect(!settings.deleteCustomPinboard(named: "Missing"))
+        #expect(settings.customPinboards.contains(personal))
+        #expect(!settings.customPinboards.contains(research))
+
+        let relaunched = AppSettings(defaults: defaults)
+        #expect(relaunched.customPinboards.contains(personal))
+        #expect(!relaunched.customPinboards.contains(research))
+    }
+
     @Test func legacyNamesMigrateInOrderWithoutEmptyOrDuplicateNames() {
         let defaults = temporaryDefaults()
         defaults.set(" Work \n\nIdeas\nWork\nPersonal ", forKey: "pinboardsText")

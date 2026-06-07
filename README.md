@@ -81,3 +81,13 @@ Manual checks still needed on a real Mac session:
 - Check the selected global shortcut on the target Mac. If macOS rejects the shortcut, Copythat Settings shows an inline warning and the menu bar icon remains available.
 - Toggle Launch at login from Copythat Settings on the target Mac. If macOS rejects the change, the app restores the previous value and shows an inline warning.
 - Check the panel on a physical multi-display setup. The frame calculator is covered with simulated left and right display bounds, but this machine only has one display attached.
+
+## Temporary DMG for sharing
+
+Create a release app bundle and DMG for a trusted tester:
+
+```sh
+./script/package_dmg.sh
+```
+
+The DMG is written to `dist/Copythat.dmg`. This is a temporary sharing build, not an Apple-notarized release, so the recipient may need to Control-click Copythat and choose Open, or allow it in System Settings > Privacy & Security. The recipient still needs to grant Accessibility permission before Copythat can paste selected history items into other apps.
