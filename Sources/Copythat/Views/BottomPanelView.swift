@@ -17,6 +17,7 @@ struct BottomPanelView: View {
     @State private var searchExpanded = false
     @State private var searchContentVisible = false
     @State private var searchHovered = false
+    @State private var hidesPreviews = false
     @State private var isCreatingPinboard = false
     @State private var pinboardDeletionRequest: PinboardDeletionRequest?
     @FocusState private var searchFocused: Bool
@@ -164,7 +165,7 @@ struct BottomPanelView: View {
             let searchExpansionReserve = CommandBarMetrics.expandedSearchWidth - CommandBarMetrics.compactSearchWidth
             let maxPinboardWidth = max(
                 80,
-                proxy.size.width - CommandBarMetrics.compactSearchWidth - CommandBarMetrics.hitSize - groupSpacing * 2 - searchExpansionReserve * 2
+                proxy.size.width - CommandBarMetrics.compactSearchWidth - CommandBarMetrics.hitSize * 2 - groupSpacing * 3 - searchExpansionReserve * 2
             )
 
             ViewThatFits(in: .horizontal) {
@@ -307,6 +308,8 @@ struct BottomPanelView: View {
                 .frame(width: CommandBarMetrics.compactSearchWidth, height: CommandBarMetrics.hitSize, alignment: .trailing)
                 .zIndex(1)
             pinboardStrip()
+            privacyButton
+                .frame(width: CommandBarMetrics.hitSize, height: CommandBarMetrics.hitSize)
             addButton
                 .frame(width: CommandBarMetrics.hitSize, height: CommandBarMetrics.hitSize)
         }
@@ -350,6 +353,17 @@ struct BottomPanelView: View {
                     store.selectedBoardID = Pinboard.custom(pinboard.name).id
                 }
             )
+        }
+    }
+
+    private var privacyButton: some View {
+        CommandBarIconButton(
+            systemName: hidesPreviews ? "eye.slash" : "eye",
+            fontSize: 15,
+            helpText: hidesPreviews ? "Show Previews" : "Hide Previews"
+        ) {
+            dismissEmptySearch()
+            hidesPreviews.toggle()
         }
     }
 
@@ -417,6 +431,7 @@ struct BottomPanelView: View {
             item: item,
             pinboards: settings.customPinboards,
             isSelected: isSelected,
+            hidesPreview: hidesPreviews,
             onSelect: { store.select(item) },
             onPaste: onPaste,
             onTogglePin: { store.togglePin(item) },

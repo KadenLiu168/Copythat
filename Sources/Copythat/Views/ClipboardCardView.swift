@@ -13,6 +13,7 @@ struct ClipboardCardView: View, Equatable {
     let item: ClipboardItem
     let pinboards: [CustomPinboard]
     let isSelected: Bool
+    let hidesPreview: Bool
     let onSelect: () -> Void
     let onPaste: () -> Void
     let onTogglePin: () -> Void
@@ -22,7 +23,8 @@ struct ClipboardCardView: View, Equatable {
     static func == (lhs: ClipboardCardView, rhs: ClipboardCardView) -> Bool {
         lhs.item == rhs.item &&
             lhs.pinboards == rhs.pinboards &&
-            lhs.isSelected == rhs.isSelected
+            lhs.isSelected == rhs.isSelected &&
+            lhs.hidesPreview == rhs.hidesPreview
     }
 
     var body: some View {
@@ -101,15 +103,19 @@ struct ClipboardCardView: View, Equatable {
 
     private var contentSection: some View {
         ZStack {
-            switch item.kind {
-            case .image:
-                imagePreview
-            case .url:
-                linkPreview
-            case .file:
-                filePreview
-            case .text:
-                textPreview
+            if hidesPreview {
+                concealedPreview
+            } else {
+                switch item.kind {
+                case .image:
+                    imagePreview
+                case .url:
+                    linkPreview
+                case .file:
+                    filePreview
+                case .text:
+                    textPreview
+                }
             }
         }
         .frame(width: cardSize.width, height: cardSize.height - headerHeight)
@@ -247,6 +253,40 @@ struct ClipboardCardView: View, Equatable {
         Label(item.preview, systemImage: item.kind.symbolName)
             .font(CopythatFont.font(size: 13, weight: .medium))
             .foregroundStyle(secondaryText)
+    }
+
+    private var concealedPreview: some View {
+        VStack(spacing: 9) {
+            Image(systemName: "eye.slash")
+                .font(CopythatFont.font(size: 24, weight: .semibold))
+                .foregroundStyle(sourceAccent.opacity(0.82))
+                .frame(width: 48, height: 48)
+                .background(
+                    Circle()
+                        .fill(sourceAccent.opacity(0.12))
+                )
+
+            Text(concealedPreviewTitle)
+                .font(CopythatFont.font(size: 13, weight: .semibold))
+                .foregroundStyle(primaryText.opacity(0.82))
+                .lineLimit(1)
+
+            Text("Use the eye control to show previews")
+                .font(CopythatFont.font(size: 11, weight: .medium))
+                .foregroundStyle(secondaryText)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    var previewContentIsHidden: Bool {
+        hidesPreview
+    }
+
+    var concealedPreviewTitle: String {
+        "Preview Hidden"
     }
 
     private var linkDisplayTitle: String {

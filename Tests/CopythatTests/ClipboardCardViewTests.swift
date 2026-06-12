@@ -21,6 +21,31 @@ struct ClipboardCardViewTests {
             item: item(text: text, iconData: icon.pngData(maxPixel: 32)),
             pinboards: [],
             isSelected: false,
+            hidesPreview: false,
+            onSelect: {},
+            onPaste: {},
+            onTogglePin: {},
+            onMoveToPinboard: { _ in },
+            onDelete: {}
+        )
+    }
+
+    @Test func previewPrivacyStateControlsCardPreviewVisibility() {
+        let visibleCard = card(text: "Private launch token", hidesPreview: false)
+        let hiddenCard = card(text: "Private launch token", hidesPreview: true)
+
+        #expect(!visibleCard.previewContentIsHidden)
+        #expect(hiddenCard.previewContentIsHidden)
+        #expect(hiddenCard.concealedPreviewTitle == "Preview Hidden")
+        #expect(visibleCard != hiddenCard)
+    }
+
+    private func card(text: String, hidesPreview: Bool) -> ClipboardCardView {
+        ClipboardCardView(
+            item: item(text: text, iconData: nil),
+            pinboards: [],
+            isSelected: false,
+            hidesPreview: hidesPreview,
             onSelect: {},
             onPaste: {},
             onTogglePin: {},
