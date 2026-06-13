@@ -90,13 +90,13 @@ struct BottomPanelView: View {
     }
 
     private var panelContainer: some View {
-        let panelShape = RoundedRectangle(cornerRadius: CopythatTokens.Panel.cornerRadius, style: .continuous)
+        let panelShape = RoundedRectangle(cornerRadius: panelCornerRadius, style: .continuous)
 
         return ZStack {
             VisualEffectView(
                 material: .popover,
                 blendingMode: .behindWindow,
-                cornerRadius: CopythatTokens.Panel.cornerRadius
+                cornerRadius: panelCornerRadius
             )
 
             panelTint
@@ -111,12 +111,12 @@ struct BottomPanelView: View {
             .padding(.bottom, 12)
             .frame(maxHeight: .infinity)
         }
+        .background(Color.clear)
         .clipShape(panelShape)
         .contentShape(panelShape)
         .overlay {
             panelShape
-                .inset(by: CopythatTokens.Panel.strokeInset)
-                .stroke(.white.opacity(CopythatTokens.Panel.strokeOpacity), lineWidth: CopythatTokens.Panel.strokeWidth)
+                .stroke(.white.opacity(0.66), lineWidth: 1)
         }
         .overlay(alignment: .top) {
             panelShape
