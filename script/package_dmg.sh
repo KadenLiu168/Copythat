@@ -43,7 +43,7 @@ cleanup_dir="$(mktemp -d -t copythat_dmg)"
 mkdir -p "$cleanup_dir/dmg-root"
 cp -R "$APP_BUNDLE" "$cleanup_dir/dmg-root/$APP_NAME.app"
 ln -s /Applications "$cleanup_dir/dmg-root/Applications"
-cp "$ROOT_DIR/README.md" "$cleanup_dir/dmg-root/README.md"
+awk '/^## Developer Notes$/ { exit } { print }' "$ROOT_DIR/README.md" >"$cleanup_dir/dmg-root/README.md"
 
 mkdir -p "$DIST_DIR"
 rm -f "$DMG_PATH"
@@ -70,6 +70,12 @@ test -d "$mounted_volume/$APP_NAME.app"
 test -L "$mounted_volume/Applications"
 test -f "$mounted_volume/README.md"
 test ! -e "$mounted_volume/Install Copythat.txt"
+grep -q "## 安装步骤" "$mounted_volume/README.md"
+grep -q "## 当前版本主要功能" "$mounted_volume/README.md"
+if grep -q "Developer Notes" "$mounted_volume/README.md"; then
+  echo "DMG README should not include Developer Notes." >&2
+  exit 1
+fi
 
 hdiutil detach "$mounted_volume" >/dev/null
 mounted_volume=""
