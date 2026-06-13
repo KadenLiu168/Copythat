@@ -1,5 +1,36 @@
+import AppKit
 import Foundation
 import ServiceManagement
+
+struct CustomPinboard: Codable, Equatable, Identifiable {
+    let name: String
+    let color: PinboardColorToken
+
+    var id: String { name }
+}
+
+enum PinboardColorToken: String, Codable, CaseIterable, Identifiable {
+    case amber
+    case green
+    case cyan
+    case blue
+    case violet
+    case pink
+
+    var id: String { rawValue }
+
+    var color: NSColor {
+        let hue: CGFloat = switch self {
+        case .amber: 0.10
+        case .green: 0.38
+        case .cyan: 0.52
+        case .blue: 0.60
+        case .violet: 0.73
+        case .pink: 0.91
+        }
+        return NSColor(calibratedHue: hue, saturation: 0.72, brightness: 0.88, alpha: 1)
+    }
+}
 
 @MainActor
 final class AppSettings: ObservableObject {
@@ -16,50 +47,101 @@ final class AppSettings: ObservableObject {
             if historyLimit != normalized {
                 historyLimit = normalized
             } else {
-                UserDefaults.standard.set(historyLimit, forKey: Keys.historyLimit)
+                defaults.set(historyLimit, forKey: Keys.historyLimit)
             }
         }
     }
     @Published var recordSensitiveContent: Bool {
-        didSet { UserDefaults.standard.set(recordSensitiveContent, forKey: Keys.recordSensitiveContent) }
+        didSet { defaults.set(recordSensitiveContent, forKey: Keys.recordSensitiveContent) }
     }
     @Published var ignoredApplications: String {
-        didSet { UserDefaults.standard.set(ignoredApplications, forKey: Keys.ignoredApplications) }
+        didSet { defaults.set(ignoredApplications, forKey: Keys.ignoredApplications) }
     }
-    @Published var pinboardsText: String {
-        didSet { UserDefaults.standard.set(pinboardsText, forKey: Keys.pinboardsText) }
+    @Published private(set) var customPinboards: [CustomPinboard] {
+        didSet { persistCustomPinboards() }
     }
     @Published var shortcut: String {
         didSet {
             if GlobalShortcut(rawValue: shortcut) == nil {
                 shortcut = GlobalShortcut.commandShiftV.rawValue
             } else {
-                UserDefaults.standard.set(shortcut, forKey: Keys.shortcut)
+                defaults.set(shortcut, forKey: Keys.shortcut)
             }
         }
     }
     @Published private(set) var shortcutError: String?
     @Published var appearance: AppearanceMode {
-        didSet { UserDefaults.standard.set(appearance.rawValue, forKey: Keys.appearance) }
+        didSet { defaults.set(appearance.rawValue, forKey: Keys.appearance) }
     }
+    private let defaults: UserDefaults
     private var isRevertingLaunchAtLogin = false
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         launchAtLogin = SMAppService.mainApp.status == .enabled
         launchAtLoginError = nil
         historyLimit = Self.normalizedHistoryLimit(
-            UserDefaults.standard.object(forKey: Keys.historyLimit) as? Int ?? 500
+            defaults.object(forKey: Keys.historyLimit) as? Int ?? 500
         )
-        recordSensitiveContent = UserDefaults.standard.object(forKey: Keys.recordSensitiveContent) as? Bool ?? false
-        ignoredApplications = UserDefaults.standard.string(forKey: Keys.ignoredApplications) ?? ""
-        pinboardsText = UserDefaults.standard.string(forKey: Keys.pinboardsText) ?? "Work\nIdeas"
-        shortcut = UserDefaults.standard.string(forKey: Keys.shortcut) ?? GlobalShortcut.commandShiftV.rawValue
+        recordSensitiveContent = defaults.object(forKey: Keys.recordSensitiveContent) as? Bool ?? false
+        ignoredApplications = defaults.string(forKey: Keys.ignoredApplications) ?? ""
+        customPinboards = Self.loadCustomPinboards(from: defaults)
+        shortcut = defaults.string(forKey: Keys.shortcut) ?? GlobalShortcut.commandShiftV.rawValue
         shortcutError = nil
-        appearance = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Keys.appearance) ?? "") ?? .system
+        appearance = AppearanceMode(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
+        persistCustomPinboards()
     }
 
-    var customPinboards: [String] {
-        pinboardsText
+    func createCustomPinboard(name: String, color: PinboardColorToken) -> CustomPinboard? {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty,
+              !customPinboards.contains(where: { $0.name == normalizedName }) else {
+            return nil
+        }
+
+        let pinboard = CustomPinboard(name: normalizedName, color: color)
+        customPinboards.append(pinboard)
+        return pinboard
+    }
+
+    func canCreateCustomPinboard(named name: String) -> Bool {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !normalizedName.isEmpty &&
+            !customPinboards.contains(where: { $0.name == normalizedName })
+    }
+
+    func deleteCustomPinboard(named name: String) -> Bool {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = customPinboards.firstIndex(where: { $0.name == normalizedName }) else {
+            return false
+        }
+
+        customPinboards.remove(at: index)
+        return true
+    }
+
+    private func persistCustomPinboards() {
+        guard let data = try? JSONEncoder().encode(customPinboards) else { return }
+        defaults.set(data, forKey: Keys.customPinboards)
+    }
+
+    private static func loadCustomPinboards(from defaults: UserDefaults) -> [CustomPinboard] {
+        if let data = defaults.data(forKey: Keys.customPinboards),
+           let pinboards = try? JSONDecoder().decode([CustomPinboard].self, from: data) {
+            return pinboards
+        }
+
+        let legacyText = defaults.string(forKey: Keys.pinboardsText) ?? "Work\nIdeas"
+        return normalizedNames(from: legacyText).enumerated().map { index, name in
+            CustomPinboard(
+                name: name,
+                color: PinboardColorToken.allCases[index % PinboardColorToken.allCases.count]
+            )
+        }
+    }
+
+    private static func normalizedNames(from text: String) -> [String] {
+        text
             .split(separator: "\n")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -119,6 +201,7 @@ final class AppSettings: ObservableObject {
         static let recordSensitiveContent = "recordSensitiveContent"
         static let ignoredApplications = "ignoredApplications"
         static let pinboardsText = "pinboardsText"
+        static let customPinboards = "customPinboards"
         static let shortcut = "shortcut"
         static let appearance = "appearance"
     }

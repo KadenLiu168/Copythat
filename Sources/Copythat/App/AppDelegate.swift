@@ -7,6 +7,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     private var panelController: PanelWindowController?
+    private lazy var settingsWindowController = SettingsWindowController(settings: model.settings, store: model.store)
     private var hotKeyManager: HotKeyManager?
     private var statusItem: NSStatusItem?
     private var statusMenuController: StatusMenuController?
@@ -30,6 +31,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panelController.show()
             DispatchQueue.main.async { [weak panelController] in
                 panelController?.show()
+            }
+        }
+
+        if ProcessInfo.processInfo.environment["COPYTHAT_OPEN_SETTINGS_ON_LAUNCH"] == "1" {
+            DispatchQueue.main.async { [weak self] in
+                self?.openSettings(nil)
             }
         }
     }
@@ -68,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         let menuController = StatusMenuController(
             showPanel: { [weak self] in self?.showPanel() },
-            openSettings: { [weak self] in self?.openSettings() },
+            openSettings: { [weak self] in self?.openSettings(nil) },
             quitApp: { [weak self] in self?.quit() }
         )
 
@@ -103,8 +110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelController?.show()
     }
 
-    @objc func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    @objc func openSettings(_ sender: Any?) {
+        settingsWindowController.show()
     }
 
     @objc func quit() {
@@ -112,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private final class StatusMenuController: NSObject {
+final class StatusMenuController: NSObject {
     weak var statusItem: NSStatusItem?
     var menu: NSMenu?
 

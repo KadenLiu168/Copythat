@@ -1,112 +1,129 @@
 #!/usr/bin/env python3
+from collections import deque
+from functools import lru_cache
 from pathlib import Path
-import math
 import subprocess
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCES = ROOT / "Sources" / "Copythat" / "Resources"
 ASSET_DIR = RESOURCES / "Assets.xcassets" / "AppIcon.appiconset"
 ICONSET_DIR = RESOURCES / "AppIcon.iconset"
-MARK_FONT = Path("/System/Library/Fonts/Avenir Next.ttc")
-APP_MARK = (255, 76, 96, 255)
-APP_BG = (255, 250, 244, 255)
+LOGO_SOURCE = ROOT / "script" / "assets" / "Copythat.png"
+DARK_EDGE_THRESHOLD = 56
+MENU_BAR_SIZE = 64
 
 
-def rounded_rectangle_mask(size, radius):
-    mask = Image.new("L", (size, size), 0)
-    draw = ImageDraw.Draw(mask)
-    draw.rounded_rectangle((0, 0, size, size), radius=radius, fill=255)
-    return mask
+try:
+    RESAMPLE = Image.Resampling.LANCZOS
+except AttributeError:
+    RESAMPLE = Image.LANCZOS
 
 
-def light_warm_background(size):
-    canvas = Image.new("RGBA", (size, size), APP_BG)
-    pixels = canvas.load()
-    glow_center = (size * 0.26, size * 0.18)
-
-    for y in range(size):
-        for x in range(size):
-            glow = max(0, 1 - math.hypot(x - glow_center[0], y - glow_center[1]) / (size * 0.95)) * 8
-            blush = max(0, 1 - math.hypot(x - size * 0.72, y - size * 0.78) / (size * 0.85)) * 8
-            edge = math.hypot(x - size / 2, y - size / 2) / (size * 0.80) * 6
-            pixels[x, y] = (
-                int(max(0, min(255, APP_BG[0] + glow - edge))),
-                int(max(0, min(255, APP_BG[1] + glow * 0.72 + blush * 0.24 - edge))),
-                int(max(0, min(255, APP_BG[2] + glow * 0.48 + blush * 0.16 - edge))),
-                255,
-            )
-
-    canvas.putalpha(rounded_rectangle_mask(size, round(size * 0.225)))
-    return canvas
+def is_edge_background(pixel):
+    red, green, blue, alpha = pixel
+    return alpha > 0 and max(red, green, blue) <= DARK_EDGE_THRESHOLD
 
 
-def c_mark_mask(size):
-    if not MARK_FONT.exists():
-        raise FileNotFoundError(f"missing icon font: {MARK_FONT}")
+def remove_edge_background(image):
+    image = image.copy()
+    width, height = image.size
+    pixels = image.load()
+    visited = bytearray(width * height)
+    queue = deque()
 
-    scale = size / 1024
-    font = ImageFont.truetype(str(MARK_FONT), max(4, round(735 * scale)))
-    stroke = round(18 * scale)
-    mask = Image.new("L", (size, size), 0)
-    draw = ImageDraw.Draw(mask)
-    box = draw.textbbox((0, 0), "C", font=font, stroke_width=stroke)
-    text_width = box[2] - box[0]
-    text_height = box[3] - box[1]
-    x = (size - text_width) / 2 - box[0] - 4 * scale
-    y = (size - text_height) / 2 - box[1] - 4 * scale
-    draw.text((x, y), "C", font=font, fill=255, stroke_width=stroke, stroke_fill=255)
+    def enqueue(x, y):
+        index = y * width + x
+        if visited[index] or not is_edge_background(pixels[x, y]):
+            return
+        visited[index] = 1
+        queue.append((x, y))
 
-    radius = max(1, round(10 * scale))
-    return mask.filter(ImageFilter.GaussianBlur(radius)).point(lambda pixel: 255 if pixel > 112 else 0)
+    for x in range(width):
+        enqueue(x, 0)
+        enqueue(x, height - 1)
+    for y in range(height):
+        enqueue(0, y)
+        enqueue(width - 1, y)
+
+    while queue:
+        x, y = queue.popleft()
+        red, green, blue, _ = pixels[x, y]
+        pixels[x, y] = (red, green, blue, 0)
+
+        if x > 0:
+            enqueue(x - 1, y)
+        if x + 1 < width:
+            enqueue(x + 1, y)
+        if y > 0:
+            enqueue(x, y - 1)
+        if y + 1 < height:
+            enqueue(x, y + 1)
+
+    return image
 
 
-def c_mark(size, fill, shadow=False):
-    scale = size / 1024
-    mask = c_mark_mask(size)
-    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+@lru_cache(maxsize=1)
+def source_logo():
+    if not LOGO_SOURCE.exists():
+        raise FileNotFoundError(f"missing logo source: {LOGO_SOURCE}")
 
-    if shadow:
-        shadow_alpha = mask.filter(ImageFilter.GaussianBlur(max(1, round(12 * scale))))
-        shadow = Image.new("RGBA", (size, size), (150, 48, 62, 34))
-        shadow.putalpha(shadow_alpha)
-        canvas.alpha_composite(shadow, (round(10 * scale), round(13 * scale)))
+    image = Image.open(LOGO_SOURCE).convert("RGBA")
+    if image.width != image.height:
+        raise ValueError(f"logo source must be square: {image.size}")
 
-    mark = Image.new("RGBA", (size, size), fill)
-    mark.putalpha(mask)
-    canvas.alpha_composite(mark)
-    return canvas
+    return remove_edge_background(image)
 
 
 def make_app_icon(size):
-    scale = size / 1024
-    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    canvas.alpha_composite(light_warm_background(size))
-    draw = ImageDraw.Draw(canvas)
-    draw.rounded_rectangle(
-        (86 * scale, 86 * scale, 938 * scale, 938 * scale),
-        radius=218 * scale,
-        outline=(255, 255, 255, 168),
-        width=max(1, round(6 * scale)),
-    )
-    draw.rounded_rectangle(
-        (136 * scale, 136 * scale, 888 * scale, 888 * scale),
-        radius=178 * scale,
-        outline=(255, 76, 96, 24),
-        width=max(1, round(3 * scale)),
-    )
-    canvas.alpha_composite(c_mark(size, APP_MARK, shadow=True))
-    return canvas
+    return source_logo().resize((size, size), RESAMPLE)
 
 
 def make_transparent_icon(size):
-    return c_mark(size, APP_MARK)
+    return make_app_icon(size)
 
 
-def make_menu_bar_icon(size=64):
-    return c_mark(size, (0, 0, 0, 255))
+def make_menu_bar_mask():
+    logo = source_logo()
+    mask = Image.new("L", logo.size, 0)
+    source_pixels = logo.load()
+    mask_pixels = mask.load()
+    width, height = logo.size
+
+    for y in range(height):
+        for x in range(width):
+            red, green, blue, alpha = source_pixels[x, y]
+            if alpha == 0:
+                continue
+
+            saturation = max(red, green, blue) - min(red, green, blue)
+            luminance = (red * 0.299) + (green * 0.587) + (blue * 0.114)
+            if saturation >= 28 and luminance <= 248:
+                mask_pixels[x, y] = alpha
+
+    bbox = mask.getbbox()
+    if bbox is None:
+        return logo.getchannel("A")
+
+    return mask.crop(bbox)
+
+
+def make_menu_bar_icon(size=MENU_BAR_SIZE):
+    mark = make_menu_bar_mask()
+    padded_side = max(mark.width, mark.height)
+    padded = Image.new("L", (padded_side, padded_side), 0)
+    padded.paste(mark, ((padded_side - mark.width) // 2, (padded_side - mark.height) // 2))
+
+    target = max(1, round(size * 0.78))
+    resized = padded.resize((target, target), RESAMPLE)
+    alpha = Image.new("L", (size, size), 0)
+    alpha.paste(resized, ((size - target) // 2, (size - target) // 2))
+
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 255))
+    image.putalpha(alpha)
+    return image
 
 
 def save_icons():

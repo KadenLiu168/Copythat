@@ -8,7 +8,6 @@ import UniformTypeIdentifiers
 final class ClipboardStore: ObservableObject {
     @Published private(set) var items: [ClipboardItem] = []
     @Published private(set) var filteredItems: [ClipboardItem] = []
-    @Published private(set) var sourceIconByApp: [String: NSImage] = [:]
     @Published var selectedID: UUID?
     @Published var searchText = "" {
         didSet { refreshFilteredItems() }
@@ -26,13 +25,12 @@ final class ClipboardStore: ObservableObject {
     private var imageEncodingTask: Task<Void, Never>?
     private var lastChangeCount: Int
 
-    init(settings: AppSettings, sourceTracker: CopySourceTracker) {
+    init(settings: AppSettings, sourceTracker: CopySourceTracker, initialItems: [ClipboardItem]? = nil) {
         self.settings = settings
         self.sourceTracker = sourceTracker
         lastChangeCount = pasteboard.changeCount
-        items = ClipboardHistoryPersistence.loadItems().map(\.storageOptimized)
+        items = initialItems ?? ClipboardHistoryPersistence.loadItems()
         refreshFilteredItems()
-        selectedID = items.first?.id
     }
 
     var selectedItem: ClipboardItem? {
@@ -76,7 +74,7 @@ final class ClipboardStore: ObservableObject {
     }
 
     func selectFirstVisibleItem() {
-        selectedID = filteredItems.first?.id
+        selectID(filteredItems.first?.id)
     }
 
     func clearPermissionMessage() {
@@ -84,41 +82,75 @@ final class ClipboardStore: ObservableObject {
     }
 
     func select(_ item: ClipboardItem) {
-        selectedID = item.id
+        selectID(item.id)
     }
 
     func moveSelection(_ delta: Int) {
         let visible = filteredItems
         guard !visible.isEmpty else {
-            selectedID = nil
+            selectID(nil)
             return
         }
         let currentIndex = visible.firstIndex { $0.id == selectedID } ?? 0
         let nextIndex = min(max(currentIndex + delta, 0), visible.count - 1)
-        selectedID = visible[nextIndex].id
+        selectID(visible[nextIndex].id)
     }
 
     func togglePin(_ item: ClipboardItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index].isPinned.toggle()
+        refreshFilteredItems()
         saveItems()
     }
 
     func move(_ item: ClipboardItem, toPinboard name: String?) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index].pinboardName = name
-        if name != nil {
-            items[index].isPinned = true
-        }
+        refreshFilteredItems()
         saveItems()
+    }
+
+    func pinboardAssignmentCount(named name: String) -> Int {
+        items.filter { $0.pinboardName == name }.count
+    }
+
+    func clearPinboardAssignments(named name: String) {
+        var didChange = false
+        for index in items.indices where items[index].pinboardName == name {
+            items[index].pinboardName = nil
+            didChange = true
+        }
+
+        guard didChange else { return }
+        refreshFilteredItems()
+        saveItems()
+    }
+
+    func selectClipboardIfViewingPinboard(named name: String) {
+        guard selectedBoardID == Pinboard.custom(name).id else { return }
+        selectedBoardID = Pinboard.all.id
     }
 
     func remove(_ item: ClipboardItem) {
         items.removeAll { $0.id == item.id }
-        if selectedID == item.id {
-            selectedID = filteredItems.first?.id
-        }
+        refreshFilteredItems()
         saveItems()
+    }
+
+    @discardableResult
+    func clearHistory(includePinnedAndPinboardItems: Bool) -> Int {
+        let originalCount = items.count
+        if includePinnedAndPinboardItems {
+            items.removeAll()
+        } else {
+            items.removeAll { !$0.isPinned && $0.pinboardName == nil }
+        }
+
+        let removedCount = originalCount - items.count
+        guard removedCount > 0 else { return 0 }
+        refreshFilteredItems()
+        saveItems()
+        return removedCount
     }
 
     func writeToPasteboard(_ item: ClipboardItem) -> Bool {
@@ -410,18 +442,19 @@ final class ClipboardStore: ObservableObject {
             let searchMatches = query.isEmpty || item.searchText.contains(query)
             return boardMatches && searchMatches
         }
-
-        var icons: [String: NSImage] = [:]
-        for item in filteredItems where icons[item.sourceApp] == nil {
-            if let icon = item.sourceAppIcon {
-                icons[item.sourceApp] = icon
-            }
+        if let selectedID, filteredItems.contains(where: { $0.id == selectedID }) {
+            return
         }
-        sourceIconByApp = icons
+        selectID(filteredItems.first?.id)
     }
 
     private func saveItems() {
         ClipboardHistoryPersistence.save(items)
+    }
+
+    private func selectID(_ id: UUID?) {
+        guard selectedID != id else { return }
+        selectedID = id
     }
 }
 

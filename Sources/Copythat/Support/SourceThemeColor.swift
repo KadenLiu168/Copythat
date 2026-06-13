@@ -2,9 +2,26 @@ import AppKit
 
 enum SourceThemeColor {
     static let neutralAccent = NSColor(calibratedRed: 0.72, green: 0.66, blue: 0.58, alpha: 1)
+    private static let accentCache: NSCache<NSData, NSColor> = {
+        let cache = NSCache<NSData, NSColor>()
+        cache.countLimit = 128
+        return cache
+    }()
 
     static func accent(icon: NSImage?) -> NSColor {
         icon?.logoThemeColor ?? neutralAccent
+    }
+
+    static func accent(iconData: Data?) -> NSColor {
+        guard let iconData else { return neutralAccent }
+        let key = iconData as NSData
+        if let cached = accentCache.object(forKey: key) {
+            return cached
+        }
+
+        let accent = accent(icon: NSImage(data: iconData))
+        accentCache.setObject(accent, forKey: key)
+        return accent
     }
 }
 

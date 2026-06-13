@@ -3,7 +3,9 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject var store: ClipboardStore
     @State private var accessibilityTrusted = AccessibilityService.isTrusted
+    @State private var isShowingClearHistoryConfirmation = false
 
     var body: some View {
         Form {
@@ -18,6 +20,14 @@ struct SettingsView: View {
                     Text("History limit: \(settings.historyLimit)")
                 }
                 Toggle("Record sensitive clipboard contents", isOn: $settings.recordSensitiveContent)
+                HStack {
+                    Text("Clipboard cards: \(store.items.count)")
+                    Spacer()
+                    Button("Clear Cards...") {
+                        isShowingClearHistoryConfirmation = true
+                    }
+                    .disabled(store.items.isEmpty)
+                }
             }
 
             Section("Shortcut") {
@@ -46,15 +56,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Pinboards") {
-                TextEditor(text: $settings.pinboardsText)
-                    .font(CopythatFont.font(size: 13))
-                    .frame(height: 76)
-                Text("One pinboard name per line.")
-                    .font(CopythatFont.font(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Ignore Applications") {
                 TextEditor(text: $settings.ignoredApplications)
                     .font(CopythatFont.font(size: 13))
@@ -78,6 +79,20 @@ struct SettingsView: View {
         .padding(16)
         .onAppear {
             accessibilityTrusted = AccessibilityService.isTrusted
+        }
+        .confirmationDialog(
+            "Clear cards?",
+            isPresented: $isShowingClearHistoryConfirmation
+        ) {
+            Button("Clear Regular Cards", role: .destructive) {
+                store.clearHistory(includePinnedAndPinboardItems: false)
+            }
+            Button("Clear All Cards", role: .destructive) {
+                store.clearHistory(includePinnedAndPinboardItems: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Regular cards exclude pinned cards and cards in pinboards.")
         }
     }
 

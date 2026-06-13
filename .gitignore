@@ -4,6 +4,8 @@ dist/
 .swiftpm/
 .claude/
 .codex/
+.understand-anything/
+AGENTS.md
 *.log
 *.tmp
 *.bak

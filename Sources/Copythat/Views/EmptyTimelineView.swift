@@ -1,30 +1,20 @@
 import SwiftUI
 
 struct EmptyTimelineView: View {
-    var body: some View {
-        VStack(spacing: 10) {
-            appMark
-            Text("Copy something to start")
-                .font(CopythatFont.font(size: 13, weight: .semibold))
-            Text("Text, links, images, and file paths will appear here.")
-                .font(CopythatFont.font(size: 12))
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: 320, height: 180)
-    }
+    let title: String
+    let description: String
 
-    @ViewBuilder
-    private var appMark: some View {
-        if let image = CopythatIcon.transparentMark() {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 40, height: 40)
-                .opacity(0.72)
-        } else {
-            Image(systemName: "c.circle")
-                .font(CopythatFont.font(size: 38))
-                .foregroundStyle(.secondary)
+    var body: some View {
+        VStack(spacing: 7) {
+            Text(title)
+                .font(CopythatFont.font(size: 13, weight: .semibold))
+                .foregroundStyle(Color(red: 0.18, green: 0.16, blue: 0.13).opacity(0.92))
+            Text(description)
+                .font(CopythatFont.font(size: 12, weight: .medium))
+                .foregroundStyle(Color(red: 0.25, green: 0.20, blue: 0.16).opacity(0.56))
         }
+        .multilineTextAlignment(.center)
+        .lineLimit(2)
+        .frame(maxWidth: 360)
     }
 }

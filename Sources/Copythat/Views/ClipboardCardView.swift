@@ -2,22 +2,30 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct ClipboardCardView: View {
+struct ClipboardCardView: View, Equatable {
     private let cardSize = CGSize(width: 236, height: 236)
-    private let headerHeight: CGFloat = 48
+    private let headerHeight: CGFloat = 52
+    private let headerIconSize: CGFloat = 52
     private let cardCornerRadius: CGFloat = 23
     private var cardShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
     }
     let item: ClipboardItem
-    let pinboards: [String]
+    let pinboards: [CustomPinboard]
     let isSelected: Bool
-    let sourceLogoIcon: NSImage?
+    let hidesPreview: Bool
     let onSelect: () -> Void
     let onPaste: () -> Void
     let onTogglePin: () -> Void
     let onMoveToPinboard: (String?) -> Void
     let onDelete: () -> Void
+
+    static func == (lhs: ClipboardCardView, rhs: ClipboardCardView) -> Bool {
+        lhs.item == rhs.item &&
+            lhs.pinboards == rhs.pinboards &&
+            lhs.isSelected == rhs.isSelected &&
+            lhs.hidesPreview == rhs.hidesPreview
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,18 +48,21 @@ struct ClipboardCardView: View {
         .offset(y: isSelected ? -5 : 0)
         .zIndex(isSelected ? 1 : 0)
         .contentShape(cardShape)
-        .animation(.snappy(duration: 0.18), value: isSelected)
-        .onTapGesture {
-            onSelect()
-            NSApp.keyWindow?.makeFirstResponder(nil)
-        }
-        .onTapGesture(count: 2, perform: onPaste)
+        .animation(.snappy(duration: 0.10), value: isSelected)
+        .onTapGesture(perform: selectForClick)
+        .simultaneousGesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    selectForClick()
+                    onPaste()
+                }
+        )
         .contextMenu {
             Button(item.isPinned ? "Unpin" : "Pin", action: onTogglePin)
             if !pinboards.isEmpty {
                 Menu("Pinboard") {
-                    ForEach(pinboards, id: \.self) { name in
-                        Button(name) { onMoveToPinboard(name) }
+                    ForEach(pinboards) { pinboard in
+                        Button(pinboard.name) { onMoveToPinboard(pinboard.name) }
                     }
                     if item.pinboardName != nil {
                         Divider()
@@ -71,68 +82,57 @@ struct ClipboardCardView: View {
             sourceAccent
 
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 7) {
-                    Text(item.kind.label)
-                        .font(CopythatFont.font(size: 19, weight: .semibold))
-                        .foregroundStyle(headerForeground)
-                        .lineLimit(1)
-
-                    if item.isPinned {
-                        Image(systemName: "pin.fill")
-                            .font(CopythatFont.font(size: 10, weight: .semibold))
-                            .foregroundStyle(headerForeground)
-                    }
-                }
-
-                Text(RelativeTime.string(from: item.createdAt))
-                    .font(CopythatFont.font(size: 13, weight: .medium))
-                    .foregroundStyle(headerForeground.opacity(0.76))
+                Text(item.kind.label)
+                    .font(CopythatFont.font(size: 16.5, weight: .semibold))
+                    .foregroundStyle(headerForeground)
                     .lineLimit(1)
 
-                if let pinboardName = item.pinboardName {
-                    Text(pinboardName)
-                        .font(CopythatFont.font(size: 9, weight: .semibold))
-                        .lineLimit(1)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(headerForeground.opacity(0.18), in: Capsule())
-                        .foregroundStyle(headerForeground)
-                }
+                Text(RelativeTime.string(from: item.createdAt))
+                    .font(CopythatFont.font(size: 12, weight: .medium))
+                    .foregroundStyle(headerForeground.opacity(0.76))
+                    .lineLimit(1)
             }
-            .padding(.leading, 15)
-            .padding(.top, 7)
-            .padding(.trailing, 84)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 17)
+            .padding(.trailing, headerIconSize + 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
             iconCarrier
-                .padding(.trailing, hasSourceLogo ? -8 : 8)
-                .offset(x: hasSourceLogo ? 2 : 0, y: hasSourceLogo ? -3 : -2)
+                .id(sourceLogoIdentity)
         }
     }
 
     private var contentSection: some View {
         ZStack {
-            switch item.kind {
-            case .image:
-                imagePreview
-            case .url:
-                linkPreview
-            case .file:
-                filePreview
-            case .text:
-                textPreview
+            if hidesPreview {
+                concealedPreview
+            } else {
+                switch item.kind {
+                case .image:
+                    imagePreview
+                case .url:
+                    linkPreview
+                case .file:
+                    filePreview
+                case .text:
+                    textPreview
+                }
             }
         }
+        .frame(width: cardSize.width, height: cardSize.height - headerHeight)
+        .clipped()
     }
 
     @ViewBuilder
     private var iconCarrier: some View {
-        if hasSourceLogo {
-            sourceLogo
-                .frame(width: 60, height: 60)
+        if let icon = sourceIconForDisplay {
+            SourceLogoImageView(image: icon, identity: sourceIconIdentity)
+                .id(sourceIconIdentity)
+                .frame(width: headerIconSize, height: headerIconSize)
+                .saturation(1.18)
+                .contrast(1.08)
         } else {
-            sourceLogo
-                .frame(width: 48, height: 48)
+            fallbackSourceLogo
+                .frame(width: headerHeight, height: headerHeight)
                 .background {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(Color.white.opacity(0.20))
@@ -141,26 +141,11 @@ struct ClipboardCardView: View {
         }
     }
 
-    private var hasSourceLogo: Bool {
-        (sourceLogoIcon ?? item.sourceAppIcon) != nil
-    }
-
-    @ViewBuilder
-    private var sourceLogo: some View {
-        if let icon = sourceLogoIcon ?? item.sourceAppIcon {
-            Image(nsImage: icon)
-                .resizable()
-                .scaledToFit()
-                .saturation(1.18)
-                .contrast(1.08)
-                .drawingGroup()
-                .shadow(color: .black.opacity(0.14), radius: 5, y: 2)
-        } else {
-            Image(systemName: item.sourceApp == "System" ? "camera.viewfinder" : item.kind.symbolName)
-                .font(CopythatFont.font(size: 38, weight: .semibold))
-                .foregroundStyle(sourceAccent)
-                .opacity(0.9)
-        }
+    private var fallbackSourceLogo: some View {
+        Image(systemName: item.sourceApp == "System" ? "camera.viewfinder" : item.kind.symbolName)
+            .font(CopythatFont.font(size: 38, weight: .semibold))
+            .foregroundStyle(sourceAccent)
+            .opacity(0.9)
     }
 
     @ViewBuilder
@@ -168,7 +153,7 @@ struct ClipboardCardView: View {
         if let image = item.image {
             Image(nsImage: image)
                 .resizable()
-                .scaledToFill()
+                .scaledToFit()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .overlay(alignment: .bottom) {
@@ -243,24 +228,13 @@ struct ClipboardCardView: View {
     }
 
     private var textPreview: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(item.preview)
-                .font(CopythatFont.font(size: 16, weight: .regular))
+                .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(primaryText)
-                .lineSpacing(3)
-                .lineLimit(7)
+                .lineSpacing(1)
+                .lineLimit(10)
                 .fixedSize(horizontal: false, vertical: false)
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.70),
-                            .init(color: .black.opacity(0.12), location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
 
             Spacer(minLength: 0)
 
@@ -269,9 +243,9 @@ struct ClipboardCardView: View {
                 .foregroundStyle(secondaryText)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 9)
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -279,6 +253,40 @@ struct ClipboardCardView: View {
         Label(item.preview, systemImage: item.kind.symbolName)
             .font(CopythatFont.font(size: 13, weight: .medium))
             .foregroundStyle(secondaryText)
+    }
+
+    private var concealedPreview: some View {
+        VStack(spacing: 9) {
+            Image(systemName: "eye.slash")
+                .font(CopythatFont.font(size: 24, weight: .semibold))
+                .foregroundStyle(sourceAccent.opacity(0.82))
+                .frame(width: 48, height: 48)
+                .background(
+                    Circle()
+                        .fill(sourceAccent.opacity(0.12))
+                )
+
+            Text(concealedPreviewTitle)
+                .font(CopythatFont.font(size: 13, weight: .semibold))
+                .foregroundStyle(primaryText.opacity(0.82))
+                .lineLimit(1)
+
+            Text("Use the eye control to show previews")
+                .font(CopythatFont.font(size: 11, weight: .medium))
+                .foregroundStyle(secondaryText)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    var previewContentIsHidden: Bool {
+        hidesPreview
+    }
+
+    var concealedPreviewTitle: String {
+        "Preview Hidden"
     }
 
     private var linkDisplayTitle: String {
@@ -317,8 +325,7 @@ struct ClipboardCardView: View {
     }
 
     private var sourceAccentNSColor: NSColor {
-        let icon = sourceLogoIcon ?? item.sourceAppIcon
-        return SourceThemeColor.accent(icon: icon)
+        SourceThemeColor.accent(iconData: item.sourceAppIconData)
     }
 
     private var headerForeground: Color {
@@ -345,6 +352,52 @@ struct ClipboardCardView: View {
             return NSItemProvider(object: image)
         }
         return NSItemProvider(object: (item.textValue ?? item.preview) as NSString)
+    }
+
+    private func selectForClick() {
+        onSelect()
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
+    var sourceIconForDisplay: NSImage? {
+        item.sourceAppIcon
+    }
+
+    var sourceIconIdentity: Int {
+        item.sourceAppIconData?.hashValue ?? 0
+    }
+
+    var sourceLogoIdentity: String {
+        "\(item.id.uuidString):\(sourceIconIdentity)"
+    }
+}
+
+private struct SourceLogoImageView: NSViewRepresentable {
+    let image: NSImage
+    let identity: Int
+
+    func makeNSView(context: Context) -> NSImageView {
+        let imageView = NSImageView()
+        imageView.imageAlignment = .alignCenter
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.wantsLayer = true
+        imageView.image = image.copy() as? NSImage ?? image
+        context.coordinator.identity = identity
+        return imageView
+    }
+
+    func updateNSView(_ imageView: NSImageView, context: Context) {
+        guard context.coordinator.identity != identity || imageView.image == nil else { return }
+        imageView.image = image.copy() as? NSImage ?? image
+        context.coordinator.identity = identity
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        var identity: Int?
     }
 }
 

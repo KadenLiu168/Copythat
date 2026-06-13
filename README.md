@@ -12,6 +12,40 @@ Use the Codex Run action, or run:
 
 The script builds the SwiftPM app, stages `dist/Copythat.app`, and opens it as a menu bar resident app.
 
+### Local signing for Accessibility testing
+
+`dist/Copythat.app` uses ad hoc signing by default. That is enough to launch the app, but macOS Accessibility trust can be unstable across rebuilds because the ad hoc code hash changes.
+
+For local development, create a self-signed Code Signing certificate in Keychain Access:
+
+1. Open Keychain Access.
+2. Choose Keychain Access > Certificate Assistant > Create a Certificate.
+3. Set Name to `Copythat Local Code Signing`.
+4. Set Identity Type to `Self Signed Root`.
+5. Set Certificate Type to `Code Signing`.
+6. Create it in the `login` keychain and set it to Always Trust if macOS asks.
+
+After this certificate exists, `./script/build_and_run.sh` automatically uses it. You can also set the identity explicitly:
+
+```sh
+export CODESIGN_IDENTITY="Copythat Local Code Signing"
+./script/build_and_run.sh
+```
+
+To force the old ad hoc fallback for comparison:
+
+```sh
+CODESIGN_IDENTITY=- ./script/build_and_run.sh
+```
+
+To inspect the staged app signature:
+
+```sh
+./script/build_and_run.sh --verify-signature
+```
+
+If you switch from ad hoc signing to local signing, remove the old Copythat entry from System Settings > Privacy & Security > Accessibility once, rebuild with `CODESIGN_IDENTITY`, grant Accessibility to `dist/Copythat.app`, rebuild again, then retry double-click or Return paste. The repeated permission prompt should stop as long as the app path, bundle identifier, and signing identity stay stable.
+
 ## Development Guidelines
 
 - Keep UI native to macOS: prefer system materials, semantic colors, system accent color, and compact controls over fixed custom palettes.
@@ -47,3 +81,13 @@ Manual checks still needed on a real Mac session:
 - Check the selected global shortcut on the target Mac. If macOS rejects the shortcut, Copythat Settings shows an inline warning and the menu bar icon remains available.
 - Toggle Launch at login from Copythat Settings on the target Mac. If macOS rejects the change, the app restores the previous value and shows an inline warning.
 - Check the panel on a physical multi-display setup. The frame calculator is covered with simulated left and right display bounds, but this machine only has one display attached.
+
+## Temporary DMG for sharing
+
+Create a release app bundle and DMG for a trusted tester:
+
+```sh
+./script/package_dmg.sh
+```
+
+The DMG is written to `dist/Copythat.dmg`. This is a temporary sharing build, not an Apple-notarized release, so the recipient may need to Control-click Copythat and choose Open, or allow it in System Settings > Privacy & Security. The recipient still needs to grant Accessibility permission before Copythat can paste selected history items into other apps.

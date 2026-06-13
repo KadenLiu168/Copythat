@@ -18,9 +18,18 @@ enum CopythatIcon {
     }
 
     private static func image(named name: String) -> NSImage? {
-        guard let url = Bundle.module.url(forResource: name, withExtension: "png") else {
+        guard let url = resourceBundle.url(forResource: name, withExtension: "png") else {
             return nil
         }
         return NSImage(contentsOf: url)
+    }
+
+    private static var resourceBundle: Bundle {
+        if let resourceURL = Bundle.main.resourceURL?.appendingPathComponent("Copythat_Copythat.bundle"),
+           let appBundle = Bundle(url: resourceURL) {
+            return appBundle
+        }
+
+        return Bundle.module
     }
 }
