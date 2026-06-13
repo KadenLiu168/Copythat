@@ -81,10 +81,10 @@ struct SettingsView: View {
             accessibilityTrusted = AccessibilityService.isTrusted
         }
         .confirmationDialog(
-            "Clear clipboard cards?",
+            "Clear cards?",
             isPresented: $isShowingClearHistoryConfirmation
         ) {
-            Button("Clear Unpinned and Uncategorized Cards", role: .destructive) {
+            Button("Clear Regular Cards", role: .destructive) {
                 store.clearHistory(includePinnedAndPinboardItems: false)
             }
             Button("Clear All Cards", role: .destructive) {
@@ -92,7 +92,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Pinned cards and cards in custom pinboards are kept unless you clear all cards.")
+            Text("Regular cards exclude pinned cards and cards in pinboards.")
         }
     }
 

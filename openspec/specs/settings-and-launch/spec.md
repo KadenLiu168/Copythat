@@ -38,8 +38,10 @@ Copythat SHALL let users manually clear clipboard cards from the native Settings
 
 #### Scenario: Clear action requires confirmation
 - **WHEN** the user activates the clear-cards action
-- **THEN** Copythat asks the user to confirm a destructive clear operation
-- **AND** Copythat offers separate choices for clearing ordinary cards or clearing all cards
+- **THEN** Copythat asks the user to confirm a destructive clear operation with concise copy
+- **AND** Copythat offers a "Clear Regular Cards" choice for the default protected clear mode
+- **AND** Copythat explains that regular cards exclude pinned cards and cards in pinboards
+- **AND** Copythat offers a separate "Clear All Cards" choice
 
 #### Scenario: No cards are available to clear
 - **WHEN** no clipboard cards are stored
