@@ -43,17 +43,7 @@ cleanup_dir="$(mktemp -d -t copythat_dmg)"
 mkdir -p "$cleanup_dir/dmg-root"
 cp -R "$APP_BUNDLE" "$cleanup_dir/dmg-root/$APP_NAME.app"
 ln -s /Applications "$cleanup_dir/dmg-root/Applications"
-
-cat >"$cleanup_dir/dmg-root/Install Copythat.txt" <<'TXT'
-Copythat temporary install
-
-1. Drag Copythat.app to Applications.
-2. Open Applications, Control-click Copythat, then choose Open.
-3. If macOS blocks the app, open System Settings > Privacy & Security and allow Copythat.
-4. In Copythat settings, grant Accessibility permission so selecting a clipboard item can paste into the previous app.
-
-This build is signed for temporary sharing but is not notarized by Apple.
-TXT
+cp "$ROOT_DIR/README.md" "$cleanup_dir/dmg-root/README.md"
 
 mkdir -p "$DIST_DIR"
 rm -f "$DMG_PATH"
@@ -78,7 +68,8 @@ fi
 
 test -d "$mounted_volume/$APP_NAME.app"
 test -L "$mounted_volume/Applications"
-test -f "$mounted_volume/Install Copythat.txt"
+test -f "$mounted_volume/README.md"
+test ! -e "$mounted_volume/Install Copythat.txt"
 
 hdiutil detach "$mounted_volume" >/dev/null
 mounted_volume=""

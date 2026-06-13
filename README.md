@@ -1,6 +1,29 @@
 # Copythat
 
-Native macOS clipboard history prototype with a menu bar app, global shortcut, bottom floating panel, search, pinned items, custom pinboards, and text, URL, image, and file capture.
+Copythat 是一个原生 macOS 剪贴板历史应用，常驻菜单栏，支持全局快捷键、底部浮动面板、搜索、置顶、自定义 Pinboard，以及文本、URL、图片和文件捕获。
+
+## 安装步骤
+
+1. 打开 DMG 后，将 `Copythat.app` 拖入 `Applications`。
+2. 打开 `Applications`，按住 Control 点击 `Copythat`，然后选择 `Open`。
+3. 如果 macOS 阻止打开应用，请前往 System Settings > Privacy & Security，允许 Copythat 运行。
+4. 打开 Copythat 设置，在 Permissions 中授予 Accessibility 权限。授予后，选择剪贴板历史项目时，Copythat 才能粘贴回上一个应用。
+
+当前 DMG 是临时分享版本，已经用于临时分发签名，但尚未经过 Apple notarization。因此首次打开时，macOS 可能要求你通过 Control-click 或 Privacy & Security 手动确认。
+
+## 当前版本主要功能
+
+- 菜单栏常驻剪贴板历史应用。
+- 使用全局快捷键打开底部浮动剪贴板面板。
+- 搜索剪贴板历史。
+- 捕获文本、URL、图片和文件类型的剪贴板内容。
+- 置顶重要剪贴板项目。
+- 创建和筛选自定义 Pinboard。
+- 选择历史项目后恢复内容；授予 Accessibility 权限后可粘贴回上一个应用。
+- 隐私开关：隐藏或恢复当前可见卡片预览。
+- 支持开机登录和快捷键设置。
+
+## Developer Notes
 
 ## Run
 
