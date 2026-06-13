@@ -137,6 +137,22 @@ final class ClipboardStore: ObservableObject {
         saveItems()
     }
 
+    @discardableResult
+    func clearHistory(includePinnedAndPinboardItems: Bool) -> Int {
+        let originalCount = items.count
+        if includePinnedAndPinboardItems {
+            items.removeAll()
+        } else {
+            items.removeAll { !$0.isPinned && $0.pinboardName == nil }
+        }
+
+        let removedCount = originalCount - items.count
+        guard removedCount > 0 else { return 0 }
+        refreshFilteredItems()
+        saveItems()
+        return removedCount
+    }
+
     func writeToPasteboard(_ item: ClipboardItem) -> Bool {
         switch item.kind {
         case .text, .url:

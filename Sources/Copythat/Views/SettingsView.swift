@@ -3,7 +3,9 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject var store: ClipboardStore
     @State private var accessibilityTrusted = AccessibilityService.isTrusted
+    @State private var isShowingClearHistoryConfirmation = false
 
     var body: some View {
         Form {
@@ -18,6 +20,14 @@ struct SettingsView: View {
                     Text("History limit: \(settings.historyLimit)")
                 }
                 Toggle("Record sensitive clipboard contents", isOn: $settings.recordSensitiveContent)
+                HStack {
+                    Text("Clipboard cards: \(store.items.count)")
+                    Spacer()
+                    Button("Clear Cards...") {
+                        isShowingClearHistoryConfirmation = true
+                    }
+                    .disabled(store.items.isEmpty)
+                }
             }
 
             Section("Shortcut") {
@@ -69,6 +79,20 @@ struct SettingsView: View {
         .padding(16)
         .onAppear {
             accessibilityTrusted = AccessibilityService.isTrusted
+        }
+        .confirmationDialog(
+            "Clear clipboard cards?",
+            isPresented: $isShowingClearHistoryConfirmation
+        ) {
+            Button("Clear Unpinned and Uncategorized Cards", role: .destructive) {
+                store.clearHistory(includePinnedAndPinboardItems: false)
+            }
+            Button("Clear All Cards", role: .destructive) {
+                store.clearHistory(includePinnedAndPinboardItems: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Pinned cards and cards in custom pinboards are kept unless you clear all cards.")
         }
     }
 

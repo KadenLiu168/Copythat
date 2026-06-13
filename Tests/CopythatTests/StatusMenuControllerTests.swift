@@ -18,7 +18,9 @@ struct StatusMenuControllerTests {
     }
 
     @Test func settingsWindowControllerCreatesSettingsWindow() {
-        let controller = SettingsWindowController(settings: AppSettings())
+        let settings = AppSettings()
+        let store = ClipboardStore(settings: settings, sourceTracker: CopySourceTracker(), initialItems: [])
+        let controller = SettingsWindowController(settings: settings, store: store)
         let window = controller.window
 
         #expect(window?.title == "Settings")

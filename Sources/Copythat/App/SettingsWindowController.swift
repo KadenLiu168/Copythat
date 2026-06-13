@@ -3,8 +3,8 @@ import SwiftUI
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
-    init(settings: AppSettings) {
-        let contentView = SettingsView(settings: settings)
+    init(settings: AppSettings, store: ClipboardStore) {
+        let contentView = SettingsView(settings: settings, store: store)
             .frame(width: 520, height: 420)
         let hostingView = NSHostingView(rootView: contentView)
         let window = NSWindow(

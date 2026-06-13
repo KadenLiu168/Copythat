@@ -7,7 +7,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     private var panelController: PanelWindowController?
-    private lazy var settingsWindowController = SettingsWindowController(settings: model.settings)
+    private lazy var settingsWindowController = SettingsWindowController(settings: model.settings, store: model.store)
     private var hotKeyManager: HotKeyManager?
     private var statusItem: NSStatusItem?
     private var statusMenuController: StatusMenuController?

@@ -6,7 +6,7 @@ struct CopythatApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(settings: appDelegate.model.settings)
+            SettingsView(settings: appDelegate.model.settings, store: appDelegate.model.store)
                 .frame(width: 520, height: 420)
         }
     }

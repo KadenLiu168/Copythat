@@ -195,6 +195,34 @@ struct ClipboardStoreSelectionTests {
         #expect(store.filteredItems.map(\.id) == [ideas.id])
     }
 
+    @Test func clearingHistoryKeepsPinnedAndPinboardItemsByDefault() {
+        let ordinary = item(text: "Ordinary")
+        let pinned = item(text: "Pinned", isPinned: true)
+        let assigned = item(text: "Assigned", pinboardName: "Work")
+        let store = store(items: [ordinary, pinned, assigned])
+
+        let removedCount = store.clearHistory(includePinnedAndPinboardItems: false)
+
+        #expect(removedCount == 1)
+        #expect(store.items.map(\.id) == [pinned.id, assigned.id])
+        #expect(store.filteredItems.map(\.id) == [pinned.id, assigned.id])
+    }
+
+    @Test func clearingAllHistoryRemovesPinnedAndPinboardItems() {
+        let pinned = item(text: "Pinned", isPinned: true)
+        let assigned = item(text: "Assigned", pinboardName: "Work")
+        let store = store(items: [pinned, assigned])
+        store.selectedBoardID = Pinboard.pinned.id
+        store.select(pinned)
+
+        let removedCount = store.clearHistory(includePinnedAndPinboardItems: true)
+
+        #expect(removedCount == 2)
+        #expect(store.items.isEmpty)
+        #expect(store.filteredItems.isEmpty)
+        #expect(store.selectedID == nil)
+    }
+
     private func store(items: [ClipboardItem]) -> ClipboardStore {
         ClipboardStore(
             settings: AppSettings(),
