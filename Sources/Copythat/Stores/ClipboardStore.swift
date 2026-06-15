@@ -24,6 +24,8 @@ final class ClipboardStore: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var imageEncodingTask: Task<Void, Never>?
     private var lastChangeCount: Int
+    private var deletedContentKeys: [String] = []
+    private let maxDeletedContentKeys = 256
 
     init(settings: AppSettings, sourceTracker: CopySourceTracker, initialItems: [ClipboardItem]? = nil) {
         self.settings = settings
@@ -132,6 +134,11 @@ final class ClipboardStore: ObservableObject {
     }
 
     func remove(_ item: ClipboardItem) {
+        let removedItems = items.filter { $0.id == item.id }
+        guard !removedItems.isEmpty else { return }
+        rememberDeleted(removedItems)
+        cancelPendingImageEncoding()
+        clearSystemPasteboardIfMatching(removedItems)
         items.removeAll { $0.id == item.id }
         refreshFilteredItems()
         saveItems()
@@ -139,18 +146,23 @@ final class ClipboardStore: ObservableObject {
 
     @discardableResult
     func clearHistory(includePinnedAndPinboardItems: Bool) -> Int {
-        let originalCount = items.count
+        let removedItems = items.filter { item in
+            includePinnedAndPinboardItems || (!item.isPinned && item.pinboardName == nil)
+        }
+        guard !removedItems.isEmpty else { return 0 }
+        rememberDeleted(removedItems)
+        cancelPendingImageEncoding()
+        clearSystemPasteboardIfMatching(removedItems)
+
         if includePinnedAndPinboardItems {
             items.removeAll()
         } else {
             items.removeAll { !$0.isPinned && $0.pinboardName == nil }
         }
 
-        let removedCount = originalCount - items.count
-        guard removedCount > 0 else { return 0 }
         refreshFilteredItems()
         saveItems()
-        return removedCount
+        return removedItems.count
     }
 
     func writeToPasteboard(_ item: ClipboardItem) -> Bool {
@@ -185,12 +197,24 @@ final class ClipboardStore: ObservableObject {
             .filter { !$0.isEmpty }
     }
 
-    private func add(_ item: ClipboardItem) {
+    func add(_ item: ClipboardItem) {
         items = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
         refreshFilteredItems()
         selectedID = item.id
         saveItems()
         enrichLinkPreviewIfNeeded(for: item)
+    }
+
+    func hasDeletedContentKey(_ key: String) -> Bool {
+        deletedContentKeys.contains(key)
+    }
+
+    func shouldInsertEncodedItem(_ item: ClipboardItem) -> Bool {
+        !hasDeletedContentKey(item.contentKey)
+    }
+
+    var hasPendingImageEncodingTask: Bool {
+        imageEncodingTask != nil
     }
 
     private func readCurrentPasteboard(changeCountDelta: Int, currentChangeCount: Int) -> ClipboardItem? {
@@ -358,8 +382,75 @@ final class ClipboardStore: ObservableObject {
                 fileURLs: [],
                 imageData: data
             )
-            self?.add(item)
+            guard let self, self.shouldInsertEncodedItem(item) else { return }
+            self.add(item)
         }
+    }
+
+    private func rememberDeleted(_ removedItems: [ClipboardItem]) {
+        for key in removedItems.map(\.contentKey) {
+            deletedContentKeys.removeAll { $0 == key }
+            deletedContentKeys.append(key)
+        }
+
+        if deletedContentKeys.count > maxDeletedContentKeys {
+            deletedContentKeys.removeFirst(deletedContentKeys.count - maxDeletedContentKeys)
+        }
+    }
+
+    private func cancelPendingImageEncoding() {
+        imageEncodingTask?.cancel()
+        imageEncodingTask = nil
+    }
+
+    private func clearSystemPasteboardIfMatching(_ removedItems: [ClipboardItem]) {
+        guard removedItems.contains(where: pasteboardMatches) else { return }
+        pasteboard.clearContents()
+        lastChangeCount = pasteboard.changeCount
+    }
+
+    private func pasteboardMatches(_ item: ClipboardItem) -> Bool {
+        switch item.kind {
+        case .text, .url:
+            return pasteboard.string(forType: .string) == (item.textValue ?? item.preview)
+        case .file:
+            guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] else {
+                return false
+            }
+            let currentPaths = urls.filter(\.isFileURL).map(\.path)
+            return currentPaths == item.fileURLs.map(\.path)
+        case .image:
+            guard let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+                  let image = images.first,
+                  let currentContentKey = imageContentKey(for: image) else {
+                return false
+            }
+            return currentContentKey == item.contentKey
+        }
+    }
+
+    func normalizedImageData(for image: NSImage) -> Data? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let data = Self.pngData(cgImage: cgImage, maxPixel: 1_200) else { return nil }
+        return data
+    }
+
+    private func imageContentKey(for image: NSImage) -> String? {
+        guard let data = normalizedImageData(for: image) else { return nil }
+        return ClipboardItem(
+            id: UUID(),
+            kind: .image,
+            title: "Image",
+            preview: "",
+            sourceApp: "",
+            sourceAppIconData: nil,
+            createdAt: Date(),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: nil,
+            fileURLs: [],
+            imageData: data
+        ).contentKey
     }
 
     private nonisolated static func pngData(cgImage: CGImage, maxPixel: CGFloat) -> Data? {
