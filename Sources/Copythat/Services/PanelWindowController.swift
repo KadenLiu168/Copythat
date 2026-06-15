@@ -60,7 +60,6 @@ final class PanelWindowController {
         )
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
@@ -146,6 +145,17 @@ final class CopythatPanel: NSPanel {
     var onPaste: (() -> Void)?
     var onClosePanel: (() -> Void)?
     var onMoveSelection: ((Int) -> Void)?
+
+    override init(
+        contentRect: NSRect,
+        styleMask style: NSWindow.StyleMask,
+        backing backingStoreType: NSWindow.BackingStoreType,
+        defer flag: Bool
+    ) {
+        super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
+        isMovable = false
+        isMovableByWindowBackground = false
+    }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
