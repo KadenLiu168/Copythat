@@ -20,6 +20,7 @@ final class ClipboardStore: ObservableObject {
     private let pasteboard = NSPasteboard.general
     private let settings: AppSettings
     private let sourceTracker: CopySourceTracker
+    private let diagnostics = ClipboardDiagnostics()
     private var timer: Timer?
     private var pollTask: Task<Void, Never>?
     private var imageEncodingTask: Task<Void, Never>?
@@ -198,7 +199,15 @@ final class ClipboardStore: ObservableObject {
     }
 
     func add(_ item: ClipboardItem) {
+        let beforeCount = items.count
+        let duplicateMetadata = ClipboardDiagnostics.duplicateMetadata(for: item, in: items)
         items = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
+        diagnostics.logInsertion(
+            item: item,
+            beforeCount: beforeCount,
+            afterCount: items.count,
+            duplicateMetadata: duplicateMetadata
+        )
         refreshFilteredItems()
         selectedID = item.id
         saveItems()
@@ -226,6 +235,7 @@ final class ClipboardStore: ObservableObject {
             let fileURLs = urls.filter(\.isFileURL)
             if !fileURLs.isEmpty {
                 let source = sourceMetadata(
+                    kind: .file,
                     changeCountDelta: changeCountDelta,
                     currentChangeCount: currentChangeCount
                 )
@@ -264,6 +274,7 @@ final class ClipboardStore: ObservableObject {
            let scheme = url.scheme?.lowercased(),
            ["http", "https"].contains(scheme) {
             let source = sourceMetadata(
+                kind: .url,
                 changeCountDelta: changeCountDelta,
                 currentChangeCount: currentChangeCount
             )
@@ -286,6 +297,7 @@ final class ClipboardStore: ObservableObject {
         let possibleFile = URL(fileURLWithPath: string)
         if FileManager.default.fileExists(atPath: possibleFile.path) {
             let source = sourceMetadata(
+                kind: .file,
                 changeCountDelta: changeCountDelta,
                 currentChangeCount: currentChangeCount
             )
@@ -307,6 +319,7 @@ final class ClipboardStore: ObservableObject {
 
         let firstLine = string.components(separatedBy: .newlines).first ?? string
         let source = sourceMetadata(
+            kind: .text,
             changeCountDelta: changeCountDelta,
             currentChangeCount: currentChangeCount
         )
@@ -356,6 +369,7 @@ final class ClipboardStore: ObservableObject {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
         let size = image.size
         let source = sourceMetadata(
+            kind: .image,
             isSystemGeneratedContent: pasteboardContainsSystemScreenshot(),
             changeCountDelta: changeCountDelta,
             currentChangeCount: currentChangeCount
@@ -487,15 +501,23 @@ final class ClipboardStore: ObservableObject {
     }
 
     private func sourceMetadata(
+        kind: ClipboardKind,
         isSystemGeneratedContent: Bool = false,
         changeCountDelta: Int,
         currentChangeCount: Int
     ) -> ClipboardSource {
-        sourceTracker.resolveSource(
+        let source = sourceTracker.resolveSource(
             isSystemGeneratedContent: isSystemGeneratedContent,
             pasteboardChangeCountDelta: changeCountDelta,
             currentPasteboardChangeCount: currentChangeCount
         )
+        diagnostics.logCapture(
+            kind: kind,
+            source: source,
+            currentChangeCount: currentChangeCount,
+            changeCountDelta: changeCountDelta
+        )
+        return source
     }
 
     private func pasteboardContainsSystemScreenshot() -> Bool {

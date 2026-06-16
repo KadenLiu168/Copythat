@@ -69,6 +69,28 @@ To inspect the staged app signature:
 
 If you switch from ad hoc signing to local signing, remove the old Copythat entry from System Settings > Privacy & Security > Accessibility once, rebuild with `CODESIGN_IDENTITY`, grant Accessibility to `dist/Copythat.app`, rebuild again, then retry double-click or Return paste. The repeated permission prompt should stop as long as the app path, bundle identifier, and signing identity stay stable.
 
+### Clipboard diagnostics
+
+Clipboard capture diagnostics are hidden and off by default. Enable them when investigating source attribution, pasteboard change-count ordering, or same-content de-duplication:
+
+```sh
+defaults write local.copythat.clipboard clipboardDiagnosticsEnabled -bool true
+```
+
+Run Copythat from `dist/Copythat.app`, then stream the diagnostic events:
+
+```sh
+/usr/bin/log stream --style compact --level info --predicate 'process == "Copythat" && category == "ClipboardDiagnostics"'
+```
+
+The diagnostics intentionally avoid raw clipboard payloads. Use `source`, `contentLength`, `contentKeyDigest`, `duplicateCount`, `duplicateIDs`, `beforeCount`, and `afterCount` to determine whether a capture inserted a new card or replaced an existing same-content card.
+
+Disable diagnostics after the investigation:
+
+```sh
+defaults delete local.copythat.clipboard clipboardDiagnosticsEnabled
+```
+
 ## Development Guidelines
 
 - Keep UI native to macOS: prefer system materials, semantic colors, system accent color, and compact controls over fixed custom palettes.
