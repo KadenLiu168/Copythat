@@ -146,7 +146,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
             title: title,
             preview: preview,
             sourceApp: sourceApp,
-            sourceAppIconData: sourceAppIcon?.pngData(maxPixel: 64),
+            sourceAppIconData: sourceAppIconData,
             createdAt: createdAt,
             isPinned: isPinned,
             pinboardName: pinboardName,
