@@ -9,10 +9,38 @@ struct ClipboardHistoryPolicyTests {
 
         let result = ClipboardHistoryPolicy.adding(newer, to: [pinned], limit: 10)
 
-        #expect(result.count == 2)
-        #expect(result[0].id == newer.id)
-        #expect(result[1].id == pinned.id)
-        #expect(result[1].isPinned)
+        #expect(result.items.count == 2)
+        #expect(result.items[0].id == newer.id)
+        #expect(result.items[1].id == pinned.id)
+        #expect(result.items[1].isPinned)
+        #expect(result.selectedID == newer.id)
+        #expect(result.insertedItem?.id == newer.id)
+    }
+
+    @Test func duplicateUnpinnedContentMovesExistingItemWithoutReplacingSource() {
+        let originalDate = Date(timeIntervalSince1970: 10)
+        let original = item(
+            text: "same",
+            sourceApp: "豆包",
+            sourceAppIconData: Data([1, 2, 3]),
+            createdAt: originalDate
+        )
+        let other = item(text: "other")
+        let newer = item(
+            text: "same",
+            sourceApp: "ChatGPT",
+            sourceAppIconData: Data([9, 8, 7]),
+            createdAt: Date(timeIntervalSince1970: 20)
+        )
+
+        let result = ClipboardHistoryPolicy.adding(newer, to: [other, original], limit: 10)
+
+        #expect(result.items.map(\.id) == [original.id, other.id])
+        #expect(result.items[0].sourceApp == "豆包")
+        #expect(result.items[0].sourceAppIconData == Data([1, 2, 3]))
+        #expect(result.items[0].createdAt == originalDate)
+        #expect(result.selectedID == original.id)
+        #expect(result.insertedItem == nil)
     }
 
     @Test func overflowDoesNotRemovePinnedItemsWhenAllItemsArePinned() {
@@ -21,8 +49,8 @@ struct ClipboardHistoryPolicyTests {
 
         let result = ClipboardHistoryPolicy.adding(newPinned, to: [oldPinned], limit: 1)
 
-        #expect(result.map(\.id) == [newPinned.id, oldPinned.id])
-        #expect(result.allSatisfy { $0.isPinned })
+        #expect(result.items.map(\.id) == [newPinned.id, oldPinned.id])
+        #expect(result.items.allSatisfy { $0.isPinned })
     }
 
     @Test func unpinnedImageHistoryIsCapped() {
@@ -31,22 +59,28 @@ struct ClipboardHistoryPolicyTests {
         let newest = imageItem(index: 101, isPinned: false)
 
         let result = ClipboardHistoryPolicy.adding(newest, to: existing + [pinned], limit: 1_000)
-        let unpinnedImageCount = result.filter { $0.kind == .image && !$0.isPinned }.count
+        let unpinnedImageCount = result.items.filter { $0.kind == .image && !$0.isPinned }.count
 
         #expect(unpinnedImageCount == 100)
-        #expect(result.contains { $0.id == pinned.id })
-        #expect(result.contains { $0.id == newest.id })
+        #expect(result.items.contains { $0.id == pinned.id })
+        #expect(result.items.contains { $0.id == newest.id })
     }
 
-    private func item(text: String, isPinned: Bool) -> ClipboardItem {
+    private func item(
+        text: String,
+        sourceApp: String = "Tests",
+        sourceAppIconData: Data? = nil,
+        createdAt: Date = Date(),
+        isPinned: Bool = false
+    ) -> ClipboardItem {
         ClipboardItem(
             id: UUID(),
             kind: .text,
             title: text,
             preview: text,
-            sourceApp: "Tests",
-            sourceAppIconData: nil,
-            createdAt: Date(),
+            sourceApp: sourceApp,
+            sourceAppIconData: sourceAppIconData,
+            createdAt: createdAt,
             isPinned: isPinned,
             pinboardName: nil,
             textValue: text,

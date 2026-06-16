@@ -1,4 +1,5 @@
 @testable import Copythat
+import AppKit
 import Combine
 import Foundation
 import Testing
@@ -221,6 +222,51 @@ struct ClipboardStoreSelectionTests {
         #expect(store.items.isEmpty)
         #expect(store.filteredItems.isEmpty)
         #expect(store.selectedID == nil)
+    }
+
+    @Test func pasteboardCaptureWaitsForStableFinalChangeCount() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        let store = ClipboardStore(
+            settings: AppSettings(defaults: temporaryDefaults()),
+            sourceTracker: CopySourceTracker(),
+            initialItems: [],
+            pasteboard: pasteboard
+        )
+
+        pasteboard.clearContents()
+        pasteboard.setString("old transient text", forType: .string)
+        store.pollPasteboard()
+
+        pasteboard.clearContents()
+        pasteboard.setString("final chatgpt text", forType: .string)
+        store.pollPasteboard()
+        store.pollPasteboard()
+
+        #expect(store.items.count == 1)
+        #expect(store.items.first?.textValue == "final chatgpt text")
+        #expect(store.items.first?.textValue != "old transient text")
+    }
+
+    @Test func writingToPasteboardClearsPendingExternalCapture() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        let store = ClipboardStore(
+            settings: AppSettings(defaults: temporaryDefaults()),
+            sourceTracker: CopySourceTracker(),
+            initialItems: [],
+            pasteboard: pasteboard
+        )
+
+        pasteboard.setString("external pending text", forType: .string)
+        store.pollPasteboard()
+
+        let wrote = store.writeToPasteboard(item(text: "restore me"))
+        store.pollPasteboard()
+
+        #expect(wrote)
+        #expect(pasteboard.string(forType: .string) == "restore me")
+        #expect(store.items.isEmpty)
     }
 
     private func store(items: [ClipboardItem]) -> ClipboardStore {

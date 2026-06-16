@@ -17,7 +17,7 @@ final class ClipboardStore: ObservableObject {
     }
     @Published var permissionMessage: String?
 
-    private let pasteboard = NSPasteboard.general
+    private let pasteboard: NSPasteboard
     private let settings: AppSettings
     private let sourceTracker: CopySourceTracker
     private let diagnostics = ClipboardDiagnostics()
@@ -25,12 +25,19 @@ final class ClipboardStore: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var imageEncodingTask: Task<Void, Never>?
     private var lastChangeCount: Int
+    private var pendingChangeCount: Int?
     private var deletedContentKeys: [String] = []
     private let maxDeletedContentKeys = 256
 
-    init(settings: AppSettings, sourceTracker: CopySourceTracker, initialItems: [ClipboardItem]? = nil) {
+    init(
+        settings: AppSettings,
+        sourceTracker: CopySourceTracker,
+        initialItems: [ClipboardItem]? = nil,
+        pasteboard: NSPasteboard = .general
+    ) {
         self.settings = settings
         self.sourceTracker = sourceTracker
+        self.pasteboard = pasteboard
         lastChangeCount = pasteboard.changeCount
         items = initialItems ?? ClipboardHistoryPersistence.loadItems()
         refreshFilteredItems()
@@ -64,14 +71,27 @@ final class ClipboardStore: ObservableObject {
     }
 
     func pollPasteboard() {
-        guard pasteboard.changeCount != lastChangeCount else { return }
         let currentChangeCount = pasteboard.changeCount
+        guard currentChangeCount != lastChangeCount else {
+            pendingChangeCount = nil
+            return
+        }
+
+        guard pendingChangeCount == currentChangeCount else {
+            pendingChangeCount = currentChangeCount
+            return
+        }
+
         let changeCountDelta = max(1, currentChangeCount - lastChangeCount)
-        lastChangeCount = currentChangeCount
+        pendingChangeCount = nil
         guard let newItem = readCurrentPasteboard(
             changeCountDelta: changeCountDelta,
             currentChangeCount: currentChangeCount
-        ) else { return }
+        ) else {
+            lastChangeCount = currentChangeCount
+            return
+        }
+        lastChangeCount = currentChangeCount
         guard !ignoredApplications.contains(newItem.sourceApp) else { return }
         add(newItem)
     }
@@ -173,20 +193,20 @@ final class ClipboardStore: ObservableObject {
             guard !string.isEmpty else { return false }
             pasteboard.clearContents()
             let didWrite = pasteboard.setString(string, forType: .string)
-            lastChangeCount = pasteboard.changeCount
+            markPasteboardProcessed()
             return didWrite
         case .file:
             let existingFileURLs = item.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
             guard !existingFileURLs.isEmpty else { return false }
             pasteboard.clearContents()
             let didWrite = pasteboard.writeObjects(existingFileURLs as [NSURL])
-            lastChangeCount = pasteboard.changeCount
+            markPasteboardProcessed()
             return didWrite
         case .image:
             guard let image = item.image else { return false }
             pasteboard.clearContents()
             let didWrite = pasteboard.writeObjects([image])
-            lastChangeCount = pasteboard.changeCount
+            markPasteboardProcessed()
             return didWrite
         }
     }
@@ -201,7 +221,8 @@ final class ClipboardStore: ObservableObject {
     func add(_ item: ClipboardItem) {
         let beforeCount = items.count
         let duplicateMetadata = ClipboardDiagnostics.duplicateMetadata(for: item, in: items)
-        items = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
+        let insertion = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
+        items = insertion.items
         diagnostics.logInsertion(
             item: item,
             beforeCount: beforeCount,
@@ -209,9 +230,11 @@ final class ClipboardStore: ObservableObject {
             duplicateMetadata: duplicateMetadata
         )
         refreshFilteredItems()
-        selectedID = item.id
+        selectedID = insertion.selectedID
         saveItems()
-        enrichLinkPreviewIfNeeded(for: item)
+        if let insertedItem = insertion.insertedItem {
+            enrichLinkPreviewIfNeeded(for: insertedItem)
+        }
     }
 
     func hasDeletedContentKey(_ key: String) -> Bool {
@@ -420,7 +443,12 @@ final class ClipboardStore: ObservableObject {
     private func clearSystemPasteboardIfMatching(_ removedItems: [ClipboardItem]) {
         guard removedItems.contains(where: pasteboardMatches) else { return }
         pasteboard.clearContents()
+        markPasteboardProcessed()
+    }
+
+    private func markPasteboardProcessed() {
         lastChangeCount = pasteboard.changeCount
+        pendingChangeCount = nil
     }
 
     private func pasteboardMatches(_ item: ClipboardItem) -> Bool {
