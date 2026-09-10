@@ -58,6 +58,36 @@ struct CopySourceTrackerTests {
         #expect(events[2].resolutionSlot == "shortcut")
     }
 
+    @Test func snapshotReturnsPreviousFrontmostWhenWritePredatesActivation() {
+        let currentFrontmost = ClipboardSource(appName: "App B", iconData: nil, capturedAt: Date())
+        let tracker = CopySourceTracker(frontmostSourceProvider: { currentFrontmost })
+
+        tracker.recordActivatedSource(
+            ClipboardSource(appName: "App A", iconData: nil, capturedAt: Date()),
+            currentChangeCount: 9
+        )
+        tracker.recordActivatedSource(currentFrontmost, currentChangeCount: 10)
+
+        let snapshot = tracker.frontmostSourceSnapshot(pasteboardChangeCount: 10)
+
+        #expect(snapshot?.appName == "App A")
+    }
+
+    @Test func snapshotKeepsCurrentFrontmostWhenWriteFollowsActivation() {
+        let currentFrontmost = ClipboardSource(appName: "App B", iconData: nil, capturedAt: Date())
+        let tracker = CopySourceTracker(frontmostSourceProvider: { currentFrontmost })
+
+        tracker.recordActivatedSource(
+            ClipboardSource(appName: "App A", iconData: nil, capturedAt: Date()),
+            currentChangeCount: 9
+        )
+        tracker.recordActivatedSource(currentFrontmost, currentChangeCount: 9)
+
+        let snapshot = tracker.frontmostSourceSnapshot(pasteboardChangeCount: 10)
+
+        #expect(snapshot?.appName == "App B")
+    }
+
     private func source(
         named name: String,
         capturedAt: Date,

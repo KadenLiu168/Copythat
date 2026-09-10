@@ -141,6 +141,35 @@ struct ClipboardStoreSourceAttributionTests {
         #expect(store.items.first?.sourceApp == "Later B")
     }
 
+    @Test func copyThenSwitchWithinOnePollIntervalKeepsCopySource() {
+        let frontmostAfterSwitch = source(named: "App B")
+        let orderedSources = OrderedFrontmostSources([
+            frontmostAfterSwitch,
+            frontmostAfterSwitch
+        ])
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        let tracker = CopySourceTracker(frontmostSourceProvider: orderedSources.next)
+        let store = ClipboardStore(
+            settings: AppSettings(defaults: temporaryDefaults()),
+            sourceTracker: tracker,
+            initialItems: [],
+            pasteboard: pasteboard,
+            persistItems: { _ in }
+        )
+
+        tracker.recordActivatedSource(source(named: "App A"), currentChangeCount: pasteboard.changeCount)
+        pasteboard.clearContents()
+        pasteboard.setString("copied text", forType: .string)
+        tracker.recordActivatedSource(frontmostAfterSwitch, currentChangeCount: pasteboard.changeCount)
+
+        store.pollPasteboard()
+        store.pollPasteboard()
+
+        #expect(store.items.first?.textValue == "copied text")
+        #expect(store.items.first?.sourceApp == "App A")
+    }
+
     private func makeStore(orderedSources: OrderedFrontmostSources) -> (ClipboardStore, NSPasteboard) {
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()

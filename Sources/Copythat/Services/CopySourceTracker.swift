@@ -46,6 +46,8 @@ final class CopySourceTracker {
     private var activationObserver: NSObjectProtocol?
     private var pendingShortcutSources: [ClipboardSource] = []
     private var recentExternalSource: ClipboardSource?
+    private var lastActivation: (source: ClipboardSource, pasteboardChangeCount: Int)?
+    private var frontmostBeforeLastActivation: ClipboardSource?
     private let frontmostSourceProvider: (() -> ClipboardSource?)?
     private let diagnostics: ClipboardDiagnostics
 
@@ -202,8 +204,26 @@ final class CopySourceTracker {
         return keyCode == kVK_ANSI_3 || keyCode == kVK_ANSI_4 || keyCode == kVK_ANSI_5
     }
 
-    func frontmostSourceSnapshot() -> ClipboardSource? {
-        currentFrontmostSource(capturedAt: Date())
+    func frontmostSourceSnapshot(pasteboardChangeCount observedChangeCount: Int? = nil) -> ClipboardSource? {
+        let current = currentFrontmostSource(
+            capturedAt: Date(),
+            pasteboardChangeCount: observedChangeCount
+        )
+        guard let current,
+              let observedChangeCount,
+              let lastActivation,
+              lastActivation.source.appName == current.appName,
+              lastActivation.pasteboardChangeCount >= observedChangeCount,
+              let previous = frontmostBeforeLastActivation,
+              previous.appName != current.appName else {
+            return current
+        }
+        return ClipboardSource(
+            appName: previous.appName,
+            iconData: previous.iconData,
+            capturedAt: Date(),
+            pasteboardChangeCount: observedChangeCount
+        )
     }
 
     private func currentFrontmostSource(capturedAt: Date, pasteboardChangeCount: Int? = nil) -> ClipboardSource? {
@@ -303,6 +323,10 @@ final class CopySourceTracker {
         currentChangeCount: Int,
         uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) {
+        if let recentExternalSource, recentExternalSource.appName != source.appName {
+            frontmostBeforeLastActivation = recentExternalSource
+        }
+        lastActivation = (source, currentChangeCount)
         recentExternalSource = source
         diagnostics.logAppActivated(
             source: source,

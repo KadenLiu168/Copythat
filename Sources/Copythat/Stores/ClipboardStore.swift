@@ -86,7 +86,9 @@ final class ClipboardStore: ObservableObject {
 
         guard pendingChangeCount == currentChangeCount else {
             pendingChangeCount = currentChangeCount
-            pendingFirstObservedSource = sourceTracker.frontmostSourceSnapshot()
+            pendingFirstObservedSource = sourceTracker.frontmostSourceSnapshot(
+                pasteboardChangeCount: currentChangeCount
+            )
             diagnostics.logPasteboardObserved(
                 changeCount: currentChangeCount,
                 source: pendingFirstObservedSource
