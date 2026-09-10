@@ -148,8 +148,18 @@ final class AppSettings: ObservableObject {
         return true
     }
 
+    /// Encoder for the persisted `customPinboards` payload. `.sortedKeys` pins
+    /// JSON key order, which a default JSONEncoder derives from per-process
+    /// hash seeding; without it the stored bytes differ between launches for
+    /// identical content. Static so tests can assert this configuration.
+    static func makeCustomPinboardsEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return encoder
+    }
+
     private func persistCustomPinboards() {
-        guard let data = try? JSONEncoder().encode(customPinboards) else { return }
+        guard let data = try? Self.makeCustomPinboardsEncoder().encode(customPinboards) else { return }
         defaults.set(data, forKey: Keys.customPinboards)
     }
 

@@ -146,6 +146,23 @@ struct AppSettingsPinboardTests {
         #expect(!settings.updateCustomPinboard(named: "work", newName: "  ", color: .amber))
     }
 
+    @Test func persistedPinboardEncoderUsesSortedKeys() {
+        #expect(AppSettings.makeCustomPinboardsEncoder().outputFormatting.contains(.sortedKeys))
+    }
+
+    @Test func persistedPinboardPayloadIsCanonicalGolden() throws {
+        let pinboards = [
+            CustomPinboard(name: "Github", color: .green),
+            CustomPinboard(name: "SKILL.md 优化", color: .pink)
+        ]
+        let data = try AppSettings.makeCustomPinboardsEncoder().encode(pinboards)
+        // Golden payload generated from the encoder itself; keys are alphabetical
+        // (color before name) because of .sortedKeys. Any field added to, removed
+        // from, or reordered in this payload means the wire format changed.
+        let golden = "[{\"color\":\"green\",\"name\":\"Github\"},{\"color\":\"pink\",\"name\":\"SKILL.md 优化\"}]"
+        #expect(String(decoding: data, as: UTF8.self) == golden)
+    }
+
     private func temporaryDefaults() -> UserDefaults {
         let suiteName = "AppSettingsPinboardTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
