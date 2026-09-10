@@ -1,0 +1,5 @@
+{"changeCount": 1197, "event": "app_activated", "sourceApp": "Google Chrome", "uptime": 395873.35366095835}
+{"changeCount": 1197, "event": "copy_shortcut_observed", "operation": "copy", "sourceApp": "Google Chrome", "uptime": 395877.3858009167}
+{"changeCount": 1198, "event": "app_activated", "sourceApp": "Code", "uptime": 395877.6212658334}
+{"changeCount": 1198, "event": "pasteboard_observed", "sourceApp": "Code", "uptime": 395877.735168625}
+{"changeCount": 1198, "event": "source_resolved", "resolutionSlot": "shortcut", "sourceApp": "Google Chrome", "uptime": 395878.18127295835}

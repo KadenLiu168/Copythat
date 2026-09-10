@@ -1,0 +1,242 @@
+[0/1] Planning build
+Building for debugging...
+[0/3] Write swift-version--1AB21518FC5DEDBE.txt
+Build complete! (0.11s)
+[0/1] Planning build
+Building for debugging...
+[0/5] Write swift-version--1AB21518FC5DEDBE.txt
+[2/33] Compiling Copythat CopySourceResolution.swift
+[3/33] Compiling Copythat CopythatFont.swift
+[4/33] Compiling Copythat CopythatIcon.swift
+[5/36] Compiling Copythat ClipboardItem.swift
+[6/36] Compiling Copythat AccessibilityService.swift
+[7/36] Compiling Copythat ClipboardPastePerformer.swift
+[8/36] Compiling Copythat RelativeTime.swift
+[9/36] Compiling Copythat SourceThemeColor.swift
+[10/36] Compiling Copythat String+Truncate.swift
+[11/36] Emitting module Copythat
+[12/36] Compiling Copythat AppDelegate.swift
+[13/36] Compiling Copythat CopythatApp.swift
+[14/36] Compiling Copythat SettingsWindowController.swift
+[15/36] Compiling Copythat CopySourceTracker.swift
+[16/36] Compiling Copythat HotKeyManager.swift
+[17/36] Compiling Copythat PanelWindowController.swift
+[18/36] Compiling Copythat SettingsView.swift
+[19/36] Compiling Copythat VisualEffectView.swift
+[20/36] Compiling Copythat resource_bundle_accessor.swift
+[21/36] Compiling Copythat AppModel.swift
+[22/36] Compiling Copythat AppSettings.swift
+[23/36] Compiling Copythat ClipboardStore.swift
+[24/36] Compiling Copythat ClipboardDiagnostics.swift
+[25/36] Compiling Copythat ClipboardHistoryPersistence.swift
+[26/36] Compiling Copythat ClipboardHistoryPolicy.swift
+[27/36] Compiling Copythat LinkPreviewFetcher.swift
+[28/36] Compiling Copythat NSImage+PasteData.swift
+[29/36] Compiling Copythat PanelFrameCalculator.swift
+[30/36] Compiling Copythat BottomPanelView.swift
+[31/36] Compiling Copythat ClipboardCardView.swift
+[32/36] Compiling Copythat EmptyTimelineView.swift
+[32/35] Linking Copythat
+[33/35] Applying Copythat
+[35/51] Compiling CopythatTests PanelFrameCalculatorTests.swift
+[36/51] Compiling CopythatTests SourceThemeColorTests.swift
+[37/52] Compiling CopythatTests RelativeTimeTests.swift
+[38/52] Compiling CopythatTests StatusMenuControllerTests.swift
+[39/52] Compiling CopythatTests CopySourceTrackerTests.swift
+[40/52] Compiling CopythatTests CopythatPanelTests.swift
+[41/52] Compiling CopythatTests ClipboardStoreSourceAttributionTests.swift
+[42/52] Compiling CopythatTests CopySourceResolutionTests.swift
+[43/52] Compiling CopythatTests ClipboardDiagnosticsTests.swift
+[44/52] Compiling CopythatTests ClipboardHistoryPolicyTests.swift
+[45/52] Compiling CopythatTests AppSettingsPinboardTests.swift
+[46/52] Compiling CopythatTests ClipboardCardViewTests.swift
+[47/52] Compiling CopythatTests ClipboardItemDecodingTests.swift
+[48/52] Compiling CopythatTests ClipboardItemStorageOptimizationTests.swift
+[49/52] Compiling CopythatTests ClipboardStoreImageDeletionTests.swift
+[50/52] Compiling CopythatTests ClipboardStoreSelectionTests.swift
+[51/52] Emitting module CopythatTests
+[51/53] Write Objects.LinkFileList
+[52/53] Linking CopythatPackageTests
+Build complete! (3.33s)
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite ClipboardItemDecodingTests started.
+◇ Suite ClipboardCardViewTests started.
+◇ Suite ClipboardItemStorageOptimizationTests started.
+◇ Suite StatusMenuControllerTests started.
+◇ Suite RelativeTimeTests started.
+◇ Suite SourceThemeColorTests started.
+◇ Suite AppSettingsPinboardTests started.
+◇ Suite ClipboardStoreSourceAttributionTests started.
+◇ Suite CopySourceResolutionTests started.
+◇ Suite CopythatPanelTests started.
+◇ Suite CopySourceTrackerTests started.
+◇ Suite PanelFrameCalculatorTests started.
+◇ Suite ClipboardStoreSelectionTests started.
+◇ Suite ClipboardStoreImageDeletionTests started.
+◇ Test previewPrivacyStateControlsCardPreviewVisibility() started.
+◇ Suite ClipboardHistoryPolicyTests started.
+◇ Test textCardsUseTheirOwnCapturedSourceIcons() started.
+◇ Test storageOptimizedPreservesSourceIconData() started.
+◇ Test iconDataAccentIsCached() started.
+◇ Test olderEncodedItemsDecodeWithDefaultsForMissingFields() started.
+◇ Test blueLogoUsesBlueSourceAccent() started.
+◇ Test sameLogoProducesSameAccentForDifferentContentKinds() started.
+◇ Test storageOptimizedStillBoundsImageAndLinkPreviewData() started.
+◇ Test multicolorLogoUsesVividAccent() started.
+◇ Test firstObservedSourceBeatsConfirmationSource() started.
+◇ Test relativeTimeUsesStableEnglishLabels() started.
+◇ Test processedPasteboardClearsPendingSourceBeforeLaterCapture() started.
+◇ Test settingsMenuItemInvokesOpenSettingsAction() started.
+◇ Test frontmostSnapshotDoesNotUpdateRecentExternalSource() started.
+◇ Suite ClipboardDiagnosticsTests started.
+◇ Test panelCannotBeRepositionedByMouseDragging() started.
+◇ Test missingLogoUsesNeutralAccent() started.
+◇ Test settingsWindowControllerCreatesSettingsWindow() started.
+◇ Test nilFirstObservedSourceFallsBackToConfirmationSource() started.
+◇ Test creationTrimsNamesPersistsColorsAndRejectsInvalidNames() started.
+◇ Test redLogoUsesRedSourceAccent() started.
+◇ Test newerChangeCountReplacesPendingSourceTogetherWithCount() started.
+◇ Test freshShortcutWinsOverAllOtherCandidates() started.
+◇ Test activationShortcutAndResolutionEmitCorrelatedDiagnostics() started.
+◇ Test deletionRemovesPinboardPersistsAndRejectsMissingNames() started.
+◇ Test emptyLegacyListKeepsOnlyBuiltInPinboardsAvailable() started.
+◇ Test staleRecentForegroundFallsBackToSystem() started.
+◇ Test staleRecentForegroundFallsBackToUnknown() started.
+◇ Test filteringKeepsSelectionVisible() started.
+◇ Test freshRecentForegroundWinsWithoutShortcutOrCurrentForeground() started.
+◇ Test framesStayWithinVisibleBounds() started.
+◇ Test legacyNamesMigrateInOrderWithoutEmptyOrDuplicateNames() started.
+◇ Test firstObservationAndResolutionEmitCorrelatedDiagnostics() started.
+◇ Test pasteboardCaptureWaitsForStableFinalChangeCount() started.
+◇ Test removingCurrentCustomPinboardAssignmentRefreshesVisibleItemsAndSelection() started.
+◇ Test colorTokensRoundTripAndShareSaturationAndBrightness() started.
+◇ Test clearingPinboardAssignmentsRefreshesVisibleItemsAndPreservesSearch() started.
+◇ Test nilFirstObservedForegroundPreservesCurrentForegroundOrdering() started.
+◇ Test firstObservedForegroundWinsOverCaptureTimeForeground() started.
+◇ Test unpinningOnlyPinnedItemClearsVisibleItemsAndSelection() started.
+◇ Test selectingCurrentItemDoesNotPublishChange() started.
+◇ Test filteringToNoItemsClearsSelection() started.
+◇ Test unpinningCurrentPinnedItemRefreshesVisibleItemsAndSelection() started.
+◇ Test deletingCurrentPinboardFallsBackToClipboardAndPreservesSearch() started.
+◇ Test writingToPasteboardClearsPendingExternalCapture() started.
+◇ Test migratedPinboardNameKeepsAssignedItemsVisible() started.
+◇ Test creatingPinboardDoesNotAssignExistingItems() started.
+◇ Test deletingNonSelectedPinboardKeepsCurrentFilterAndPreservesSearch() started.
+◇ Test clearingHistoryKeepsPinnedAndPinboardItemsByDefault() started.
+◇ Test clearingPinboardAssignmentsMovesItemsOutWithoutDeletingOrUnpinning() started.
+◇ Test clearingAllHistoryRemovesPinnedAndPinboardItems() started.
+◇ Test customPinboardAssignmentDoesNotChangePinnedState() started.
+◇ Test unpinnedImageHistoryIsCapped() started.
+◇ Test overflowDoesNotRemovePinnedItemsWhenAllItemsArePinned() started.
+◇ Test duplicateCopiesDoNotRemovePinnedItems() started.
+◇ Test duplicateUnpinnedContentMovesExistingItemWithoutReplacingSource() started.
+◇ Test removingImageRemembersDeletedContentKey() started.
+✔ Test previewPrivacyStateControlsCardPreviewVisibility() passed after 0.002 seconds.
+◇ Test sourceTimingEventsExposeAuditableMetadata() started.
+◇ Test contentSummaryDoesNotExposeRawURLOrFilePathPayloads() started.
+✔ Test olderEncodedItemsDecodeWithDefaultsForMissingFields() passed after 0.002 seconds.
+◇ Test disabledDiagnosticsEmitNoSourceTimingEvents() started.
+◇ Test sourceTimingEventSerializationContainsNoClipboardPayload() started.
+◇ Test diagnosticsAreDisabledByDefault() started.
+◇ Test contentSummaryDoesNotExposeRawTextPayload() started.
+◇ Test duplicateMetadataReportsMatchingItemsAndPinnedStatus() started.
+✔ Test relativeTimeUsesStableEnglishLabels() passed after 0.002 seconds.
+✔ Test missingLogoUsesNeutralAccent() passed after 0.002 seconds.
+✔ Test freshShortcutWinsOverAllOtherCandidates() passed after 0.002 seconds.
+✔ Test frontmostSnapshotDoesNotUpdateRecentExternalSource() passed after 0.002 seconds.
+✔ Test staleRecentForegroundFallsBackToSystem() passed after 0.003 seconds.
+✔ Test staleRecentForegroundFallsBackToUnknown() passed after 0.003 seconds.
+✔ Test framesStayWithinVisibleBounds() passed after 0.003 seconds.
+✔ Test freshRecentForegroundWinsWithoutShortcutOrCurrentForeground() passed after 0.003 seconds.
+✔ Test nilFirstObservedForegroundPreservesCurrentForegroundOrdering() passed after 0.003 seconds.
+✔ Test firstObservedForegroundWinsOverCaptureTimeForeground() passed after 0.003 seconds.
+✔ Test activationShortcutAndResolutionEmitCorrelatedDiagnostics() passed after 0.006 seconds.
+✔ Test overflowDoesNotRemovePinnedItemsWhenAllItemsArePinned() passed after 0.004 seconds.
+✔ Test duplicateCopiesDoNotRemovePinnedItems() passed after 0.004 seconds.
+✔ Test duplicateUnpinnedContentMovesExistingItemWithoutReplacingSource() passed after 0.004 seconds.
+✔ Test sourceTimingEventsExposeAuditableMetadata() passed after 0.004 seconds.
+✔ Test contentSummaryDoesNotExposeRawURLOrFilePathPayloads() passed after 0.004 seconds.
+✔ Suite ClipboardItemDecodingTests passed after 0.007 seconds.
+✔ Test disabledDiagnosticsEmitNoSourceTimingEvents() passed after 0.004 seconds.
+✔ Test sourceTimingEventSerializationContainsNoClipboardPayload() passed after 0.004 seconds.
+✔ Test diagnosticsAreDisabledByDefault() passed after 0.004 seconds.
+✔ Test contentSummaryDoesNotExposeRawTextPayload() passed after 0.004 seconds.
+✔ Test duplicateMetadataReportsMatchingItemsAndPinnedStatus() passed after 0.004 seconds.
+✔ Suite RelativeTimeTests passed after 0.007 seconds.
+✔ Suite CopySourceResolutionTests passed after 0.007 seconds.
+✔ Suite PanelFrameCalculatorTests passed after 0.007 seconds.
+✔ Test multicolorLogoUsesVividAccent() passed after 0.007 seconds.
+✔ Suite CopySourceTrackerTests passed after 0.007 seconds.
+✔ Suite ClipboardDiagnosticsTests passed after 0.007 seconds.
+✔ Test blueLogoUsesBlueSourceAccent() passed after 0.008 seconds.
+✔ Test redLogoUsesRedSourceAccent() passed after 0.008 seconds.
+✔ Test sameLogoProducesSameAccentForDifferentContentKinds() passed after 0.010 seconds.
+✔ Test unpinnedImageHistoryIsCapped() passed after 0.014 seconds.
+✔ Suite ClipboardHistoryPolicyTests passed after 0.016 seconds.
+✔ Test iconDataAccentIsCached() passed after 0.047 seconds.
+✔ Test storageOptimizedPreservesSourceIconData() passed after 0.047 seconds.
+✔ Suite SourceThemeColorTests passed after 0.047 seconds.
+✔ Test textCardsUseTheirOwnCapturedSourceIcons() passed after 0.049 seconds.
+✔ Suite ClipboardCardViewTests passed after 0.049 seconds.
+✔ Test firstObservedSourceBeatsConfirmationSource() passed after 0.199 seconds.
+✔ Test processedPasteboardClearsPendingSourceBeforeLaterCapture() passed after 0.204 seconds.
+✔ Test panelCannotBeRepositionedByMouseDragging() passed after 0.206 seconds.
+✔ Test settingsMenuItemInvokesOpenSettingsAction() passed after 0.206 seconds.
+✔ Suite CopythatPanelTests passed after 0.206 seconds.
+✔ Test settingsWindowControllerCreatesSettingsWindow() passed after 0.209 seconds.
+✔ Test nilFirstObservedSourceFallsBackToConfirmationSource() passed after 0.209 seconds.
+✔ Suite StatusMenuControllerTests passed after 0.209 seconds.
+✔ Test creationTrimsNamesPersistsColorsAndRejectsInvalidNames() passed after 0.223 seconds.
+✔ Test newerChangeCountReplacesPendingSourceTogetherWithCount() passed after 0.225 seconds.
+✔ Test deletionRemovesPinboardPersistsAndRejectsMissingNames() passed after 0.225 seconds.
+✔ Test emptyLegacyListKeepsOnlyBuiltInPinboardsAvailable() passed after 0.225 seconds.
+✔ Test filteringKeepsSelectionVisible() passed after 0.225 seconds.
+✔ Test legacyNamesMigrateInOrderWithoutEmptyOrDuplicateNames() passed after 0.228 seconds.
+✔ Test pasteboardCaptureWaitsForStableFinalChangeCount() passed after 0.228 seconds.
+✔ Test removingCurrentCustomPinboardAssignmentRefreshesVisibleItemsAndSelection() passed after 0.228 seconds.
+✔ Test firstObservationAndResolutionEmitCorrelatedDiagnostics() passed after 0.228 seconds.
+✔ Test colorTokensRoundTripAndShareSaturationAndBrightness() passed after 0.228 seconds.
+✔ Test clearingPinboardAssignmentsRefreshesVisibleItemsAndPreservesSearch() passed after 0.228 seconds.
+✔ Test filteringToNoItemsClearsSelection() passed after 0.228 seconds.
+✔ Test unpinningCurrentPinnedItemRefreshesVisibleItemsAndSelection() passed after 0.228 seconds.
+✔ Test migratedPinboardNameKeepsAssignedItemsVisible() passed after 0.228 seconds.
+✔ Test deletingNonSelectedPinboardKeepsCurrentFilterAndPreservesSearch() passed after 0.228 seconds.
+✔ Test unpinningOnlyPinnedItemClearsVisibleItemsAndSelection() passed after 0.228 seconds.
+✔ Test clearingHistoryKeepsPinnedAndPinboardItemsByDefault() passed after 0.228 seconds.
+✔ Test clearingPinboardAssignmentsMovesItemsOutWithoutDeletingOrUnpinning() passed after 0.228 seconds.
+✔ Test deletingCurrentPinboardFallsBackToClipboardAndPreservesSearch() passed after 0.228 seconds.
+✔ Test writingToPasteboardClearsPendingExternalCapture() passed after 0.228 seconds.
+✔ Test creatingPinboardDoesNotAssignExistingItems() passed after 0.228 seconds.
+✔ Test selectingCurrentItemDoesNotPublishChange() passed after 0.228 seconds.
+✔ Test customPinboardAssignmentDoesNotChangePinnedState() passed after 0.228 seconds.
+✔ Test removingImageRemembersDeletedContentKey() passed after 0.226 seconds.
+✔ Test clearingAllHistoryRemovesPinnedAndPinboardItems() passed after 0.228 seconds.
+✔ Suite AppSettingsPinboardTests passed after 0.229 seconds.
+◇ Test encodedImageCompletionIsRejectedAfterDeletion() started.
+✔ Suite ClipboardStoreSourceAttributionTests passed after 0.229 seconds.
+✔ Suite ClipboardStoreSelectionTests passed after 0.229 seconds.
+✔ Test encodedImageCompletionIsRejectedAfterDeletion() passed after 0.002 seconds.
+◇ Test clearingHistoryRemembersOnlyActuallyRemovedItems() started.
+✔ Test clearingHistoryRemembersOnlyActuallyRemovedItems() passed after 0.002 seconds.
+◇ Test normalAddPathCanRecordSameImageAfterDeletion() started.
+✔ Test normalAddPathCanRecordSameImageAfterDeletion() passed after 0.003 seconds.
+◇ Test deletingCurrentImageClearsPasteboardAndCancelsPendingEncoding() started.
+✔ Test deletingCurrentImageClearsPasteboardAndCancelsPendingEncoding() passed after 0.004 seconds.
+◇ Test deletingOlderItemDoesNotClearCurrentPasteboard() started.
+✔ Test deletingOlderItemDoesNotClearCurrentPasteboard() passed after 0.003 seconds.
+✔ Suite ClipboardStoreImageDeletionTests passed after 0.246 seconds.
+✔ Test storageOptimizedStillBoundsImageAndLinkPreviewData() passed after 0.860 seconds.
+✔ Suite ClipboardItemStorageOptimizationTests passed after 0.860 seconds.
+✔ Test run with 68 tests in 16 suites passed after 0.861 seconds.
+content keys ok
+pasteboard write ok
+paste target ok
+paste decision ok
+source resolution ok
+source attribution timing analyzer tests passed
+history ok count=5000 bytes=1356192 all=0.00268575 seconds search=0.009211166 seconds pinned=20 work=10
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+ModuleNotFoundError: No module named 'PIL'

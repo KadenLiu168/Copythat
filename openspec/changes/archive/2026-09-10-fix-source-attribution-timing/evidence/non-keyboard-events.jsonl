@@ -1,0 +1,4 @@
+{"changeCount": 1150, "event": "app_activated", "sourceApp": "Google Chrome", "uptime": 386043.88670058333}
+{"changeCount": 1151, "event": "pasteboard_observed", "sourceApp": "Google Chrome", "uptime": 386044.30111783335}
+{"changeCount": 1151, "event": "app_activated", "sourceApp": "Code", "uptime": 386044.4626918334}
+{"changeCount": 1151, "event": "source_resolved", "resolutionSlot": "firstObservedForeground", "sourceApp": "Google Chrome", "uptime": 386044.74321783334}
