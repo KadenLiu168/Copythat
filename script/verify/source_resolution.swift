@@ -2,6 +2,7 @@ import Foundation
 
 func resolvedName(
     shortcut: CopySourceSnapshot?,
+    firstObservedForeground: CopySourceSnapshot? = nil,
     currentForeground: CopySourceSnapshot?,
     recentForeground: CopySourceSnapshot?,
     isSystemGeneratedContent: Bool = false,
@@ -9,6 +10,7 @@ func resolvedName(
 ) -> String {
     let slot = CopySourceResolution.resolveSlot(
         shortcut: shortcut,
+        firstObservedForeground: firstObservedForeground,
         currentForeground: currentForeground,
         recentForeground: recentForeground,
         isSystemGeneratedContent: isSystemGeneratedContent,
@@ -18,6 +20,8 @@ func resolvedName(
     switch slot {
     case .shortcut:
         return shortcut?.appName ?? "Unknown"
+    case .firstObservedForeground:
+        return firstObservedForeground?.appName ?? "Unknown"
     case .currentForeground:
         return currentForeground?.appName ?? "Unknown"
     case .recentForeground:
@@ -47,6 +51,14 @@ struct SourceResolutionVerify {
             recentForeground: nil,
             now: now
         ) == "Xcode", "event tap unavailable should fall back to current foreground app")
+
+        precondition(resolvedName(
+            shortcut: nil,
+            firstObservedForeground: CopySourceSnapshot(appName: "Chrome", capturedAt: now),
+            currentForeground: CopySourceSnapshot(appName: "Code", capturedAt: now),
+            recentForeground: nil,
+            now: now
+        ) == "Chrome", "first-observed foreground should beat capture-time foreground app")
 
         precondition(resolvedName(
             shortcut: nil,

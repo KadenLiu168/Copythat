@@ -53,7 +53,8 @@ struct ClipboardStoreSelectionTests {
         let store = ClipboardStore(
             settings: settings,
             sourceTracker: CopySourceTracker(),
-            initialItems: [assigned, item(text: "Other")]
+            initialItems: [assigned, item(text: "Other")],
+            persistItems: { _ in }
         )
 
         store.selectedBoardID = Pinboard.custom(settings.customPinboards[0].name).id
@@ -70,7 +71,8 @@ struct ClipboardStoreSelectionTests {
         let store = ClipboardStore(
             settings: settings,
             sourceTracker: CopySourceTracker(),
-            initialItems: [existing]
+            initialItems: [existing],
+            persistItems: { _ in }
         )
 
         let created = settings.createCustomPinboard(name: "Research", color: .pink)
@@ -231,7 +233,8 @@ struct ClipboardStoreSelectionTests {
             settings: AppSettings(defaults: temporaryDefaults()),
             sourceTracker: CopySourceTracker(),
             initialItems: [],
-            pasteboard: pasteboard
+            pasteboard: pasteboard,
+            persistItems: { _ in }
         )
 
         pasteboard.clearContents()
@@ -255,7 +258,8 @@ struct ClipboardStoreSelectionTests {
             settings: AppSettings(defaults: temporaryDefaults()),
             sourceTracker: CopySourceTracker(),
             initialItems: [],
-            pasteboard: pasteboard
+            pasteboard: pasteboard,
+            persistItems: { _ in }
         )
 
         pasteboard.setString("external pending text", forType: .string)
@@ -273,7 +277,8 @@ struct ClipboardStoreSelectionTests {
         ClipboardStore(
             settings: AppSettings(),
             sourceTracker: CopySourceTracker(),
-            initialItems: items
+            initialItems: items,
+            persistItems: { _ in }
         )
     }
 

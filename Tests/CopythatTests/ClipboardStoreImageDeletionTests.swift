@@ -84,7 +84,8 @@ struct ClipboardStoreImageDeletionTests {
         ClipboardStore(
             settings: AppSettings(defaults: temporaryDefaults()),
             sourceTracker: CopySourceTracker(),
-            initialItems: items
+            initialItems: items,
+            persistItems: { _ in }
         )
     }
 

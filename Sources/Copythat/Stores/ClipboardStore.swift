@@ -20,12 +20,14 @@ final class ClipboardStore: ObservableObject {
     private let pasteboard: NSPasteboard
     private let settings: AppSettings
     private let sourceTracker: CopySourceTracker
-    private let diagnostics = ClipboardDiagnostics()
+    private let diagnostics: ClipboardDiagnostics
+    private let persistItems: ([ClipboardItem]) -> Void
     private var timer: Timer?
     private var pollTask: Task<Void, Never>?
     private var imageEncodingTask: Task<Void, Never>?
     private var lastChangeCount: Int
     private var pendingChangeCount: Int?
+    private var pendingFirstObservedSource: ClipboardSource?
     private var deletedContentKeys: [String] = []
     private let maxDeletedContentKeys = 256
 
@@ -33,11 +35,15 @@ final class ClipboardStore: ObservableObject {
         settings: AppSettings,
         sourceTracker: CopySourceTracker,
         initialItems: [ClipboardItem]? = nil,
-        pasteboard: NSPasteboard = .general
+        pasteboard: NSPasteboard = .general,
+        diagnostics: ClipboardDiagnostics = ClipboardDiagnostics(),
+        persistItems: @escaping ([ClipboardItem]) -> Void = ClipboardHistoryPersistence.save
     ) {
         self.settings = settings
         self.sourceTracker = sourceTracker
         self.pasteboard = pasteboard
+        self.diagnostics = diagnostics
+        self.persistItems = persistItems
         lastChangeCount = pasteboard.changeCount
         items = initialItems ?? ClipboardHistoryPersistence.loadItems()
         refreshFilteredItems()
@@ -74,19 +80,28 @@ final class ClipboardStore: ObservableObject {
         let currentChangeCount = pasteboard.changeCount
         guard currentChangeCount != lastChangeCount else {
             pendingChangeCount = nil
+            pendingFirstObservedSource = nil
             return
         }
 
         guard pendingChangeCount == currentChangeCount else {
             pendingChangeCount = currentChangeCount
+            pendingFirstObservedSource = sourceTracker.frontmostSourceSnapshot()
+            diagnostics.logPasteboardObserved(
+                changeCount: currentChangeCount,
+                source: pendingFirstObservedSource
+            )
             return
         }
 
         let changeCountDelta = max(1, currentChangeCount - lastChangeCount)
+        let firstObservedSource = pendingFirstObservedSource
         pendingChangeCount = nil
+        pendingFirstObservedSource = nil
         guard let newItem = readCurrentPasteboard(
             changeCountDelta: changeCountDelta,
-            currentChangeCount: currentChangeCount
+            currentChangeCount: currentChangeCount,
+            firstObservedSource: firstObservedSource
         ) else {
             lastChangeCount = currentChangeCount
             return
@@ -249,7 +264,11 @@ final class ClipboardStore: ObservableObject {
         imageEncodingTask != nil
     }
 
-    private func readCurrentPasteboard(changeCountDelta: Int, currentChangeCount: Int) -> ClipboardItem? {
+    private func readCurrentPasteboard(
+        changeCountDelta: Int,
+        currentChangeCount: Int,
+        firstObservedSource: ClipboardSource?
+    ) -> ClipboardItem? {
         guard settings.recordSensitiveContent || !pasteboardContainsSensitiveContent() else {
             return nil
         }
@@ -260,7 +279,8 @@ final class ClipboardStore: ObservableObject {
                 let source = sourceMetadata(
                     kind: .file,
                     changeCountDelta: changeCountDelta,
-                    currentChangeCount: currentChangeCount
+                    currentChangeCount: currentChangeCount,
+                    firstObservedSource: firstObservedSource
                 )
                 return ClipboardItem(
                     id: UUID(),
@@ -284,7 +304,8 @@ final class ClipboardStore: ObservableObject {
             enqueueImageItem(
                 image: image,
                 changeCountDelta: changeCountDelta,
-                currentChangeCount: currentChangeCount
+                currentChangeCount: currentChangeCount,
+                firstObservedSource: firstObservedSource
             )
             return nil
         }
@@ -299,7 +320,8 @@ final class ClipboardStore: ObservableObject {
             let source = sourceMetadata(
                 kind: .url,
                 changeCountDelta: changeCountDelta,
-                currentChangeCount: currentChangeCount
+                currentChangeCount: currentChangeCount,
+                firstObservedSource: firstObservedSource
             )
             return ClipboardItem(
                 id: UUID(),
@@ -322,7 +344,8 @@ final class ClipboardStore: ObservableObject {
             let source = sourceMetadata(
                 kind: .file,
                 changeCountDelta: changeCountDelta,
-                currentChangeCount: currentChangeCount
+                currentChangeCount: currentChangeCount,
+                firstObservedSource: firstObservedSource
             )
             return ClipboardItem(
                 id: UUID(),
@@ -344,7 +367,8 @@ final class ClipboardStore: ObservableObject {
         let source = sourceMetadata(
             kind: .text,
             changeCountDelta: changeCountDelta,
-            currentChangeCount: currentChangeCount
+            currentChangeCount: currentChangeCount,
+            firstObservedSource: firstObservedSource
         )
         return ClipboardItem(
             id: UUID(),
@@ -388,14 +412,20 @@ final class ClipboardStore: ObservableObject {
         saveItems()
     }
 
-    private func enqueueImageItem(image: NSImage, changeCountDelta: Int, currentChangeCount: Int) {
+    private func enqueueImageItem(
+        image: NSImage,
+        changeCountDelta: Int,
+        currentChangeCount: Int,
+        firstObservedSource: ClipboardSource?
+    ) {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
         let size = image.size
         let source = sourceMetadata(
             kind: .image,
             isSystemGeneratedContent: pasteboardContainsSystemScreenshot(),
             changeCountDelta: changeCountDelta,
-            currentChangeCount: currentChangeCount
+            currentChangeCount: currentChangeCount,
+            firstObservedSource: firstObservedSource
         )
 
         imageEncodingTask?.cancel()
@@ -449,6 +479,7 @@ final class ClipboardStore: ObservableObject {
     private func markPasteboardProcessed() {
         lastChangeCount = pasteboard.changeCount
         pendingChangeCount = nil
+        pendingFirstObservedSource = nil
     }
 
     private func pasteboardMatches(_ item: ClipboardItem) -> Bool {
@@ -532,10 +563,12 @@ final class ClipboardStore: ObservableObject {
         kind: ClipboardKind,
         isSystemGeneratedContent: Bool = false,
         changeCountDelta: Int,
-        currentChangeCount: Int
+        currentChangeCount: Int,
+        firstObservedSource: ClipboardSource?
     ) -> ClipboardSource {
         let source = sourceTracker.resolveSource(
             isSystemGeneratedContent: isSystemGeneratedContent,
+            firstObservedSource: firstObservedSource,
             pasteboardChangeCountDelta: changeCountDelta,
             currentPasteboardChangeCount: currentChangeCount
         )
@@ -590,7 +623,7 @@ final class ClipboardStore: ObservableObject {
     }
 
     private func saveItems() {
-        ClipboardHistoryPersistence.save(items)
+        persistItems(items)
     }
 
     private func selectID(_ id: UUID?) {

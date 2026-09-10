@@ -12,8 +12,9 @@ struct CopySourceSnapshot {
     }
 }
 
-enum CopySourceResolutionSlot: Equatable {
+enum CopySourceResolutionSlot: String, Equatable {
     case shortcut
+    case firstObservedForeground
     case currentForeground
     case recentForeground
     case system
@@ -55,6 +56,7 @@ enum CopySourceResolution {
 
     static func resolveSlot(
         shortcut: CopySourceSnapshot?,
+        firstObservedForeground: CopySourceSnapshot? = nil,
         currentForeground: CopySourceSnapshot?,
         recentForeground: CopySourceSnapshot?,
         isSystemGeneratedContent: Bool,
@@ -62,6 +64,10 @@ enum CopySourceResolution {
     ) -> CopySourceResolutionSlot {
         if isFresh(shortcut, maxAge: shortcutMaxAge, now: now) {
             return .shortcut
+        }
+
+        if firstObservedForeground != nil {
+            return .firstObservedForeground
         }
 
         if currentForeground != nil {

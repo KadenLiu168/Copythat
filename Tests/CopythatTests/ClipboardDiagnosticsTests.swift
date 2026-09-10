@@ -63,6 +63,110 @@ struct ClipboardDiagnosticsTests {
         #expect(!metadata.itemIDList.contains(differentID.uuidString))
     }
 
+    @Test func sourceTimingEventsExposeAuditableMetadata() {
+        let defaults = enabledDefaults()
+        var events: [ClipboardDiagnostics.SourceTimingEvent] = []
+        let diagnostics = ClipboardDiagnostics(defaults: defaults, eventSink: { events.append($0) })
+        let firstSource = source(named: "Google Chrome", capturedAt: 10)
+        let activatedSource = source(named: "Code", capturedAt: 10.2)
+
+        diagnostics.logPasteboardObserved(
+            changeCount: 41,
+            source: firstSource,
+            uptime: 10
+        )
+        diagnostics.logAppActivated(
+            source: activatedSource,
+            currentChangeCount: 41,
+            uptime: 10.2
+        )
+        diagnostics.logCopyShortcutObserved(
+            operation: .copy,
+            source: firstSource,
+            baselineChangeCount: 41,
+            uptime: 10.3
+        )
+        diagnostics.logSourceResolved(
+            slot: .firstObservedForeground,
+            source: firstSource,
+            currentChangeCount: 41,
+            uptime: 10.45
+        )
+
+        #expect(events == [
+            .init(
+                event: .pasteboardObserved,
+                uptime: 10,
+                changeCount: 41,
+                sourceApp: "Google Chrome"
+            ),
+            .init(
+                event: .appActivated,
+                uptime: 10.2,
+                changeCount: 41,
+                sourceApp: "Code"
+            ),
+            .init(
+                event: .copyShortcutObserved,
+                uptime: 10.3,
+                changeCount: 41,
+                sourceApp: "Google Chrome",
+                operation: "copy"
+            ),
+            .init(
+                event: .sourceResolved,
+                uptime: 10.45,
+                changeCount: 41,
+                sourceApp: "Google Chrome",
+                resolutionSlot: "firstObservedForeground"
+            )
+        ])
+    }
+
+    @Test func disabledDiagnosticsEmitNoSourceTimingEvents() {
+        let suiteName = "ClipboardDiagnosticsTests.disabled.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        var events: [ClipboardDiagnostics.SourceTimingEvent] = []
+        let diagnostics = ClipboardDiagnostics(defaults: defaults, eventSink: { events.append($0) })
+        let source = source(named: "Google Chrome", capturedAt: 10)
+
+        diagnostics.logPasteboardObserved(changeCount: 41, source: source, uptime: 10)
+        diagnostics.logAppActivated(source: source, currentChangeCount: 41, uptime: 10.1)
+        diagnostics.logCopyShortcutObserved(
+            operation: .copy,
+            source: source,
+            baselineChangeCount: 41,
+            uptime: 10.2
+        )
+        diagnostics.logSourceResolved(
+            slot: .shortcut,
+            source: source,
+            currentChangeCount: 42,
+            uptime: 10.3
+        )
+
+        #expect(events.isEmpty)
+    }
+
+    @Test func sourceTimingEventSerializationContainsNoClipboardPayload() throws {
+        let event = ClipboardDiagnostics.SourceTimingEvent(
+            event: .sourceResolved,
+            uptime: 12.5,
+            changeCount: 99,
+            sourceApp: "Google Chrome",
+            resolutionSlot: "shortcut"
+        )
+        let serialized = try event.jsonLine()
+
+        #expect(serialized.contains("source_resolved"))
+        #expect(serialized.contains("Google Chrome"))
+        #expect(serialized.contains("12.5"))
+        #expect(!serialized.contains("secret-marker-123"))
+        #expect(!serialized.contains("https://example.com/private"))
+        #expect(!serialized.contains("/Users/kaden/private.txt"))
+    }
+
     private func textItem(
         id: UUID = UUID(),
         text: String,
@@ -82,6 +186,22 @@ struct ClipboardDiagnosticsTests {
             textValue: text,
             fileURLs: [],
             imageData: nil
+        )
+    }
+
+    private func enabledDefaults() -> UserDefaults {
+        let suiteName = "ClipboardDiagnosticsTests.enabled.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(true, forKey: ClipboardDiagnostics.defaultsKey)
+        return defaults
+    }
+
+    private func source(named name: String, capturedAt: TimeInterval) -> ClipboardSource {
+        ClipboardSource(
+            appName: name,
+            iconData: nil,
+            capturedAt: Date(timeIntervalSince1970: capturedAt)
         )
     }
 

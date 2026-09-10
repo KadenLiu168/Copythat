@@ -46,6 +46,16 @@ final class CopySourceTracker {
     private var activationObserver: NSObjectProtocol?
     private var pendingShortcutSources: [ClipboardSource] = []
     private var recentExternalSource: ClipboardSource?
+    private let frontmostSourceProvider: (() -> ClipboardSource?)?
+    private let diagnostics: ClipboardDiagnostics
+
+    init(
+        frontmostSourceProvider: (() -> ClipboardSource?)? = nil,
+        diagnostics: ClipboardDiagnostics = ClipboardDiagnostics()
+    ) {
+        self.frontmostSourceProvider = frontmostSourceProvider
+        self.diagnostics = diagnostics
+    }
 
     func start() {
         observeExternalAppActivations()
@@ -82,9 +92,11 @@ final class CopySourceTracker {
 
     func resolveSource(
         isSystemGeneratedContent: Bool = false,
+        firstObservedSource: ClipboardSource? = nil,
         pasteboardChangeCountDelta: Int = 1,
         currentPasteboardChangeCount: Int? = nil,
-        now: Date = Date()
+        now: Date = Date(),
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) -> ClipboardSource {
         let shortcutSource = consumeRecentShortcutSource(
             pasteboardChangeCountDelta: pasteboardChangeCountDelta,
@@ -98,24 +110,35 @@ final class CopySourceTracker {
 
         let slot = CopySourceResolution.resolveSlot(
             shortcut: shortcutSource?.snapshot,
+            firstObservedForeground: firstObservedSource?.snapshot,
             currentForeground: currentForegroundSource?.snapshot,
             recentForeground: recentExternalSource?.snapshot,
             isSystemGeneratedContent: isSystemGeneratedContent,
             now: now
         )
 
+        let resolvedSource: ClipboardSource
         switch slot {
         case .shortcut:
-            return shortcutSource ?? .unknown()
+            resolvedSource = shortcutSource ?? .unknown()
+        case .firstObservedForeground:
+            resolvedSource = firstObservedSource ?? .unknown()
         case .currentForeground:
-            return currentForegroundSource ?? .unknown()
+            resolvedSource = currentForegroundSource ?? .unknown()
         case .recentForeground:
-            return recentExternalSource ?? .unknown()
+            resolvedSource = recentExternalSource ?? .unknown()
         case .system:
-            return .system()
+            resolvedSource = .system()
         case .unknown:
-            return .unknown()
+            resolvedSource = .unknown()
         }
+        diagnostics.logSourceResolved(
+            slot: slot,
+            source: resolvedSource,
+            currentChangeCount: currentPasteboardChangeCount,
+            uptime: uptime
+        )
+        return resolvedSource
     }
 
     deinit {
@@ -157,8 +180,10 @@ final class CopySourceTracker {
               ) else {
             return
         }
-        appendPendingShortcutSource(source)
-        recentExternalSource = source
+        recordShortcutSource(
+            source,
+            operation: keyCode == kVK_ANSI_C ? .copy : .cut
+        )
     }
 
     private func isCopyOrCutShortcut(keyCode: Int, flags: CGEventFlags) -> Bool {
@@ -177,7 +202,15 @@ final class CopySourceTracker {
         return keyCode == kVK_ANSI_3 || keyCode == kVK_ANSI_4 || keyCode == kVK_ANSI_5
     }
 
+    func frontmostSourceSnapshot() -> ClipboardSource? {
+        currentFrontmostSource(capturedAt: Date())
+    }
+
     private func currentFrontmostSource(capturedAt: Date, pasteboardChangeCount: Int? = nil) -> ClipboardSource? {
+        if let frontmostSourceProvider {
+            return frontmostSourceProvider()
+        }
+
         guard let app = NSWorkspace.shared.frontmostApplication,
               let source = source(
                 for: app,
@@ -241,17 +274,56 @@ final class CopySourceTracker {
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
                 return
             }
-            self?.updateRecentExternalSource(from: app, capturedAt: Date())
+            self?.updateRecentExternalSource(from: app, capturedAt: Date(), logActivation: true)
         }
     }
 
-    private func updateRecentExternalSource(from app: NSRunningApplication?, capturedAt: Date) {
+    private func updateRecentExternalSource(
+        from app: NSRunningApplication?,
+        capturedAt: Date,
+        logActivation: Bool = false
+    ) {
         guard let app,
               let source = source(for: app, capturedAt: capturedAt) else {
             return
         }
 
+        if logActivation {
+            recordActivatedSource(
+                source,
+                currentChangeCount: NSPasteboard.general.changeCount
+            )
+        } else {
+            recentExternalSource = source
+        }
+    }
+
+    func recordActivatedSource(
+        _ source: ClipboardSource,
+        currentChangeCount: Int,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
         recentExternalSource = source
+        diagnostics.logAppActivated(
+            source: source,
+            currentChangeCount: currentChangeCount,
+            uptime: uptime
+        )
+    }
+
+    func recordShortcutSource(
+        _ source: ClipboardSource,
+        operation: ClipboardDiagnostics.ShortcutOperation,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        appendPendingShortcutSource(source)
+        recentExternalSource = source
+        diagnostics.logCopyShortcutObserved(
+            operation: operation,
+            source: source,
+            baselineChangeCount: source.pasteboardChangeCount ?? NSPasteboard.general.changeCount,
+            uptime: uptime
+        )
     }
 
     private func source(

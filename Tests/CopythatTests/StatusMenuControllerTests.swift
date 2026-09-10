@@ -19,7 +19,12 @@ struct StatusMenuControllerTests {
 
     @Test func settingsWindowControllerCreatesSettingsWindow() {
         let settings = AppSettings()
-        let store = ClipboardStore(settings: settings, sourceTracker: CopySourceTracker(), initialItems: [])
+        let store = ClipboardStore(
+            settings: settings,
+            sourceTracker: CopySourceTracker(),
+            initialItems: [],
+            persistItems: { _ in }
+        )
         let controller = SettingsWindowController(settings: settings, store: store)
         let window = controller.window
 
