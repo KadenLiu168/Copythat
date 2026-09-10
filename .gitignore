@@ -5,7 +5,9 @@ dist/
 .claude/
 .codex/
 .understand-anything/
-AGENTS.md
+.pi/
+.agents/
+.workbuddy/
 *.log
 *.tmp
 *.bak
