@@ -11,10 +11,24 @@ struct AppSettingsPinboardTests {
 
         #expect(decoded == PinboardColorToken.allCases)
         #expect(Set(PinboardColorToken.allCases.map { $0.color.hsbComponents.hue }).count == PinboardColorToken.allCases.count)
+
+        let targets: [PinboardColorToken: (hue: CGFloat, saturation: CGFloat, brightness: CGFloat)] = [
+            .amber: (0.08, 0.90, 0.95),
+            .green: (0.36, 0.80, 0.78),
+            .cyan: (0.52, 0.89, 0.85),
+            .blue: (0.60, 0.85, 0.92),
+            .violet: (0.74, 0.70, 0.85),
+            .pink: (0.93, 0.72, 0.97),
+        ]
+
         for token in PinboardColorToken.allCases {
             let components = token.color.hsbComponents
-            #expect(abs(components.saturation - 0.72) < 0.001)
-            #expect(abs(components.brightness - 0.88) < 0.001)
+            let target = try #require(targets[token])
+            #expect(abs(components.hue - target.hue) < 0.01)
+            #expect(abs(components.saturation - target.saturation) < 0.01)
+            #expect(abs(components.brightness - target.brightness) < 0.01)
+            #expect(components.saturation >= 0.55)
+            #expect(components.brightness >= 0.75)
         }
     }
 

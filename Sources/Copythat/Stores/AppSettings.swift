@@ -20,15 +20,20 @@ enum PinboardColorToken: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var color: NSColor {
-        let hue: CGFloat = switch self {
-        case .amber: 0.10
-        case .green: 0.38
-        case .cyan: 0.52
-        case .blue: 0.60
-        case .violet: 0.73
-        case .pink: 0.91
+        let components: (hue: CGFloat, saturation: CGFloat, brightness: CGFloat) = switch self {
+        case .amber: (0.08, 0.90, 0.95)
+        case .green: (0.36, 0.80, 0.78)
+        case .cyan: (0.52, 0.89, 0.85)
+        case .blue: (0.60, 0.85, 0.92)
+        case .violet: (0.74, 0.70, 0.85)
+        case .pink: (0.93, 0.72, 0.97)
         }
-        return NSColor(calibratedHue: hue, saturation: 0.72, brightness: 0.88, alpha: 1)
+        return NSColor(
+            calibratedHue: components.hue,
+            saturation: components.saturation,
+            brightness: components.brightness,
+            alpha: 1
+        )
     }
 }
 
