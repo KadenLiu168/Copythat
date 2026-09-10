@@ -392,6 +392,17 @@ private struct SourceLogoImageView: NSViewRepresentable {
         context.coordinator.identity = identity
     }
 
+    // Without this, SwiftUI sizes the NSImageView by its intrinsicContentSize
+    // (= the image's point size) whenever that exceeds the proposed frame, so
+    // high-resolution icons render beyond the 52pt header slot.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSImageView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height,
+              width.isFinite, height.isFinite, width > 0, height > 0 else {
+            return nil
+        }
+        return CGSize(width: width, height: height)
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }

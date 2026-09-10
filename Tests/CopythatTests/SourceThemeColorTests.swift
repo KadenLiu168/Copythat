@@ -47,11 +47,70 @@ struct SourceThemeColorTests {
         #expect(first === second)
         #expect(first.isVivid)
     }
+
+    @Test func solidColorIconPreservesHue() {
+        let color = SourceThemeColor.accent(icon: solidIcon(hue: 0.58, saturation: 0.8, brightness: 0.9))
+
+        #expect(abs(color.hueComponent - 0.58) <= 0.03)
+    }
+
+    @Test func multiColorIconReturnsHighestCoverageVividColor() {
+        // 60% red coverage against two smaller, more saturated regions.
+        let color = SourceThemeColor.accent(icon: coverageWeightedIcon())
+
+        let hue = color.hueComponent
+        let isRedHue = hue <= 0.05 || hue >= 0.95
+        #expect(isRedHue, "expected dominant-coverage red hue, got \(hue)")
+    }
+
+    @Test func neutralRegionsDoNotDiluteVividResult() {
+        let whiteDominated = SourceThemeColor.accent(icon: neutralDominatedIcon(neutral: .white))
+        let blackDominated = SourceThemeColor.accent(icon: neutralDominatedIcon(neutral: .black))
+        let grayDominated = SourceThemeColor.accent(icon: neutralDominatedIcon(neutral: NSColor(calibratedWhite: 0.5, alpha: 1)))
+
+        #expect(whiteDominated.saturationComponent >= 0.3)
+        #expect(blackDominated.saturationComponent >= 0.3)
+        #expect(grayDominated.saturationComponent >= 0.3)
+    }
+
+    @Test func fullySaturatedColorIsBoundedBelowNeon() {
+        // Brightness just under the legacy filter threshold so the extractor
+        // must return a real color rather than falling back to neutralAccent.
+        let color = SourceThemeColor.accent(icon: solidIcon(hue: 0.55, saturation: 1.0, brightness: 0.98))
+
+        #expect(color.saturationComponent <= 0.92)
+    }
 }
 
 private func solidIcon(red: CGFloat, green: CGFloat, blue: CGFloat) -> NSImage {
     bitmapIcon(width: 32, height: 32) { _, _ in
         NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1)
+    }
+}
+
+private func solidIcon(hue: CGFloat, saturation: CGFloat, brightness: CGFloat) -> NSImage {
+    bitmapIcon(width: 32, height: 32) { _, _ in
+        NSColor(calibratedHue: hue, saturation: saturation, brightness: brightness, alpha: 1)
+    }
+}
+
+private func coverageWeightedIcon() -> NSImage {
+    bitmapIcon(width: 60, height: 60) { x, _ in
+        if x < 36 {
+            return NSColor(calibratedRed: 0.92, green: 0.16, blue: 0.12, alpha: 1)
+        }
+        if x < 48 {
+            return NSColor(calibratedRed: 0.0, green: 0.0, blue: 1.0, alpha: 1)
+        }
+        return NSColor(calibratedRed: 0.98, green: 0.84, blue: 0.0, alpha: 1)
+    }
+}
+
+private func neutralDominatedIcon(neutral: NSColor) -> NSImage {
+    bitmapIcon(width: 60, height: 60) { x, _ in
+        x < 18
+            ? NSColor(calibratedRed: 0.92, green: 0.16, blue: 0.12, alpha: 1)
+            : neutral
     }
 }
 

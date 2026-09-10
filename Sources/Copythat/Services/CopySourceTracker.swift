@@ -362,9 +362,9 @@ final class CopySourceTracker {
 
         let iconData: Data?
         if let bundlePath = app.bundleURL?.path {
-            iconData = NSWorkspace.shared.icon(forFile: bundlePath).pngData(maxPixel: 160)
+            iconData = NSWorkspace.shared.icon(forFile: bundlePath).appIconPNGData(maxPixel: 160)
         } else {
-            iconData = app.icon?.pngData(maxPixel: 160)
+            iconData = app.icon?.appIconPNGData(maxPixel: 160)
         }
 
         return ClipboardSource(

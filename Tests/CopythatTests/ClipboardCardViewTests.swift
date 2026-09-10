@@ -1,5 +1,6 @@
 @testable import Copythat
 import AppKit
+import SwiftUI
 import Testing
 
 struct ClipboardCardViewTests {
@@ -38,6 +39,64 @@ struct ClipboardCardViewTests {
         #expect(hiddenCard.previewContentIsHidden)
         #expect(hiddenCard.concealedPreviewTitle == "Preview Hidden")
         #expect(visibleCard != hiddenCard)
+    }
+
+    @Test func highResolutionSourceIconStaysWithinHeaderSlot() throws {
+        // Regression: NSImageView sizes itself to the image's intrinsic point
+        // size unless the representable implements sizeThatFits, so a 160px
+        // icon previously rendered far beyond the 52pt header slot.
+        let iconData = try #require(highResIcon().pngData(maxPixel: 160))
+        let card = ClipboardCardView(
+            item: item(text: "High-res icon", iconData: iconData),
+            pinboards: [],
+            isSelected: false,
+            hidesPreview: false,
+            onSelect: {},
+            onPaste: {},
+            onTogglePin: {},
+            onMoveToPinboard: { _ in },
+            onDelete: {}
+        )
+
+        let hosting = NSHostingView(rootView: card)
+        hosting.frame = NSRect(x: 0, y: 0, width: 236, height: 236)
+        hosting.layoutSubtreeIfNeeded()
+
+        let iconView = try #require(
+            allSubviews(of: hosting).compactMap { $0 as? NSImageView }.first
+        )
+        #expect(iconView.frame.width <= 52.5)
+        #expect(iconView.frame.height <= 52.5)
+    }
+
+    private func highResIcon() -> NSImage {
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 160,
+            pixelsHigh: 160,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        )!
+
+        let color = NSColor(calibratedRed: 0.10, green: 0.42, blue: 0.92, alpha: 1)
+        for x in 0..<160 {
+            for y in 0..<160 {
+                bitmap.setColor(color, atX: x, y: y)
+            }
+        }
+
+        let image = NSImage(size: NSSize(width: 160, height: 160))
+        image.addRepresentation(bitmap)
+        return image
+    }
+
+    private func allSubviews(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + allSubviews(of: $0) }
     }
 
     private func card(text: String, hidesPreview: Bool) -> ClipboardCardView {
