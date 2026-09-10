@@ -4,6 +4,10 @@ import Combine
 import Foundation
 import Testing
 
+private final class PersistedItemsCapture {
+    var calls: [[ClipboardItem]] = []
+}
+
 @MainActor
 struct ClipboardStoreSelectionTests {
     @Test func selectingCurrentItemDoesNotPublishChange() {
@@ -271,6 +275,88 @@ struct ClipboardStoreSelectionTests {
         #expect(wrote)
         #expect(pasteboard.string(forType: .string) == "restore me")
         #expect(store.items.isEmpty)
+    }
+
+    @Test func renamingPinboardAssignmentsMigratesMatchingItemsOnly() {
+        let capture = PersistedItemsCapture()
+        let assigned = item(text: "Assigned", pinboardName: "Work", isPinned: true)
+        let otherAssigned = item(text: "Other assigned", pinboardName: "Ideas")
+        let unassigned = item(text: "Unassigned")
+        let store = ClipboardStore(
+            settings: AppSettings(),
+            sourceTracker: CopySourceTracker(),
+            initialItems: [assigned, otherAssigned, unassigned],
+            persistItems: { capture.calls.append($0) }
+        )
+        store.selectedBoardID = Pinboard.custom("Work").id
+
+        #expect(store.filteredItems.map(\.id) == [assigned.id])
+
+        store.renamePinboardAssignments(from: "Work", to: "Project")
+
+        let migrated = store.items.first { $0.id == assigned.id }
+        #expect(migrated?.pinboardName == "Project")
+        #expect(migrated?.isPinned == true)
+        #expect(migrated?.textValue == "Assigned")
+        #expect(store.items.first { $0.id == otherAssigned.id }?.pinboardName == "Ideas")
+        #expect(store.items.first { $0.id == unassigned.id }?.pinboardName == nil)
+        #expect(store.filteredItems.isEmpty)
+        #expect(capture.calls.last?.first { $0.id == assigned.id }?.pinboardName == "Project")
+        #expect(capture.calls.last?.count == 3)
+    }
+
+    @Test func renamingSelectedPinboardFollowsRenameAndPreservesSearch() {
+        let assigned = item(text: "Alpha assigned", pinboardName: "Work")
+        let other = item(text: "Alpha other")
+        let store = store(items: [assigned, other])
+        store.selectedBoardID = Pinboard.custom("Work").id
+        store.searchText = "alpha"
+
+        #expect(store.filteredItems.map(\.id) == [assigned.id])
+
+        store.renamePinboardAssignments(from: "Work", to: "Project")
+        store.migrateSelectionAfterPinboardRename(from: "Work", to: "Project")
+
+        #expect(store.selectedBoardID == Pinboard.custom("Project").id)
+        #expect(store.searchText == "alpha")
+        #expect(store.filteredItems.map(\.id) == [assigned.id])
+        #expect(store.items.first { $0.id == assigned.id }?.pinboardName == "Project")
+    }
+
+    @Test func renamingNonSelectedPinboardKeepsSelectionAndSearch() {
+        let work = item(text: "Alpha work", pinboardName: "Work")
+        let ideas = item(text: "Alpha ideas", pinboardName: "Ideas")
+        let store = store(items: [work, ideas])
+        store.selectedBoardID = Pinboard.custom("Ideas").id
+        store.searchText = "alpha"
+
+        store.renamePinboardAssignments(from: "Work", to: "Project")
+        store.migrateSelectionAfterPinboardRename(from: "Work", to: "Project")
+
+        #expect(store.selectedBoardID == Pinboard.custom("Ideas").id)
+        #expect(store.searchText == "alpha")
+        #expect(store.filteredItems.map(\.id) == [ideas.id])
+    }
+
+    @Test func colorOnlySettingsUpdateDoesNotRewriteAssignments() {
+        let defaults = temporaryDefaults()
+        defaults.set("Work", forKey: "pinboardsText")
+        let settings = AppSettings(defaults: defaults)
+        let assigned = item(text: "Assigned", pinboardName: "Work", isPinned: true)
+        let store = ClipboardStore(
+            settings: settings,
+            sourceTracker: CopySourceTracker(),
+            initialItems: [assigned],
+            persistItems: { _ in }
+        )
+        let itemsBefore = store.items
+        let filteredBefore = store.filteredItems
+
+        #expect(settings.updateCustomPinboard(named: "Work", newName: "Work", color: .blue))
+
+        #expect(store.items == itemsBefore)
+        #expect(store.filteredItems == filteredBefore)
+        #expect(settings.customPinboards == [CustomPinboard(name: "Work", color: .blue)])
     }
 
     private func store(items: [ClipboardItem]) -> ClipboardStore {

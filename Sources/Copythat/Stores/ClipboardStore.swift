@@ -166,6 +166,23 @@ final class ClipboardStore: ObservableObject {
         saveItems()
     }
 
+    func renamePinboardAssignments(from oldName: String, to newName: String) {
+        var didChange = false
+        for index in items.indices where items[index].pinboardName == oldName {
+            items[index].pinboardName = newName
+            didChange = true
+        }
+
+        guard didChange else { return }
+        refreshFilteredItems()
+        saveItems()
+    }
+
+    func migrateSelectionAfterPinboardRename(from oldName: String, to newName: String) {
+        guard selectedBoardID == Pinboard.custom(oldName).id else { return }
+        selectedBoardID = Pinboard.custom(newName).id
+    }
+
     func selectClipboardIfViewingPinboard(named name: String) {
         guard selectedBoardID == Pinboard.custom(name).id else { return }
         selectedBoardID = Pinboard.all.id

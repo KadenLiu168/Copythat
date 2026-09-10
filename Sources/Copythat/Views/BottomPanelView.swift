@@ -19,6 +19,7 @@ struct BottomPanelView: View {
     @State private var searchHovered = false
     @State private var hidesPreviews = false
     @State private var isCreatingPinboard = false
+    @State private var pinboardEditRequest: PinboardEditRequest?
     @State private var pinboardDeletionRequest: PinboardDeletionRequest?
     @FocusState private var searchFocused: Bool
     let onClose: () -> Void
@@ -64,6 +65,8 @@ struct BottomPanelView: View {
             .onExitCommand {
                 if isCreatingPinboard {
                     isCreatingPinboard = false
+                } else if pinboardEditRequest != nil {
+                    pinboardEditRequest = nil
                 } else {
                     onClose()
                 }
@@ -86,6 +89,16 @@ struct BottomPanelView: View {
                 Button("Cancel", role: .cancel) {}
             } message: { request in
                 Text(pinboardDeletionMessage(for: request))
+            }
+            .popover(item: $pinboardEditRequest, arrowEdge: .top) { request in
+                EditPinboardPopover(
+                    settings: settings,
+                    pinboard: request.pinboard,
+                    onCancel: { pinboardEditRequest = nil },
+                    onSave: { name, color in
+                        confirmPinboardEdit(request, newName: name, color: color)
+                    }
+                )
             }
     }
 
@@ -332,7 +345,8 @@ struct BottomPanelView: View {
             title: displayTitle(for: board),
             dotColor: pinboardDotColor(for: board),
             isSelected: isSelected,
-            onDelete: board.kind == .custom ? { requestPinboardDeletion(for: board) } : nil
+            onDelete: board.kind == .custom ? { requestPinboardDeletion(for: board) } : nil,
+            onEdit: board.kind == .custom ? { requestPinboardEdit(for: board) } : nil
         ) {
             dismissEmptySearch()
             store.selectedBoardID = board.id
@@ -512,6 +526,23 @@ struct BottomPanelView: View {
         )
     }
 
+    private func requestPinboardEdit(for board: Pinboard) {
+        guard let name = board.customName,
+              let pinboard = settings.customPinboards.first(where: { $0.name == name }) else { return }
+        pinboardEditRequest = PinboardEditRequest(pinboard: pinboard)
+    }
+
+    private func confirmPinboardEdit(_ request: PinboardEditRequest, newName: String, color: PinboardColorToken) {
+        let currentName = request.pinboard.name
+        let trimmedNewName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard settings.updateCustomPinboard(named: currentName, newName: trimmedNewName, color: color) else { return }
+        if trimmedNewName != currentName {
+            store.renamePinboardAssignments(from: currentName, to: trimmedNewName)
+            store.migrateSelectionAfterPinboardRename(from: currentName, to: trimmedNewName)
+        }
+        pinboardEditRequest = nil
+    }
+
     private func confirmPinboardDeletion(_ request: PinboardDeletionRequest) {
         guard settings.deleteCustomPinboard(named: request.name) else { return }
         store.clearPinboardAssignments(named: request.name)
@@ -530,6 +561,12 @@ private struct PinboardDeletionRequest: Identifiable {
     let affectedClipCount: Int
 
     var id: String { name }
+}
+
+private struct PinboardEditRequest: Identifiable {
+    let pinboard: CustomPinboard
+
+    var id: String { pinboard.name }
 }
 
 private struct NewPinboardPopover: View {
@@ -600,6 +637,88 @@ private struct NewPinboardPopover: View {
     }
 }
 
+private struct EditPinboardPopover: View {
+    @ObservedObject var settings: AppSettings
+    let currentName: String
+    let onCancel: () -> Void
+    let onSave: (String, PinboardColorToken) -> Void
+    @State private var name: String
+    @State private var selectedColor: PinboardColorToken
+    @FocusState private var nameFocused: Bool
+
+    init(
+        settings: AppSettings,
+        pinboard: CustomPinboard,
+        onCancel: @escaping () -> Void,
+        onSave: @escaping (String, PinboardColorToken) -> Void
+    ) {
+        self.settings = settings
+        self.currentName = pinboard.name
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _name = State(initialValue: pinboard.name)
+        _selectedColor = State(initialValue: pinboard.color)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Edit Pinboard")
+                .font(CopythatFont.font(size: 15, weight: .semibold))
+
+            TextField("Pinboard name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($nameFocused)
+                .onSubmit(save)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Color")
+                    .font(CopythatFont.font(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    ForEach(PinboardColorToken.allCases) { color in
+                        Button {
+                            selectedColor = color
+                        } label: {
+                            Circle()
+                                .fill(Color(nsColor: color.color))
+                                .frame(width: 20, height: 20)
+                                .padding(3)
+                                .overlay {
+                                    Circle()
+                                        .stroke(.primary.opacity(selectedColor == color ? 0.62 : 0), lineWidth: 1.5)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .help(color.rawValue.capitalized)
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!settings.canUpdateCustomPinboard(named: currentName, newName: name))
+            }
+        }
+        .padding(16)
+        .frame(width: 250)
+        .onAppear {
+            DispatchQueue.main.async {
+                nameFocused = true
+            }
+        }
+        .onExitCommand(perform: onCancel)
+    }
+
+    private func save() {
+        onSave(name, selectedColor)
+    }
+}
+
 private struct CommandBarIconButton: View {
     let systemName: String
     let fontSize: CGFloat
@@ -661,14 +780,20 @@ private struct PinboardFilterButton: View {
     let dotColor: Color
     let isSelected: Bool
     let onDelete: (() -> Void)?
+    let onEdit: (() -> Void)?
     let action: () -> Void
     @State private var isHovered = false
 
     var body: some View {
-        if let onDelete {
+        if onDelete != nil || onEdit != nil {
             button
                 .contextMenu {
-                    Button("Delete Pinboard...", role: .destructive, action: onDelete)
+                    if let onEdit {
+                        Button("Edit Pinboard...", action: onEdit)
+                    }
+                    if let onDelete {
+                        Button("Delete Pinboard...", role: .destructive, action: onDelete)
+                    }
                 }
         } else {
             button

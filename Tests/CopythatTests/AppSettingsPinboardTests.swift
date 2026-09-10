@@ -73,6 +73,65 @@ struct AppSettingsPinboardTests {
         #expect(settings.customPinboards.isEmpty)
     }
 
+    @Test func updateCustomPinboardRenamesRecolorsAndPersists() throws {
+        let defaults = temporaryDefaults()
+        defaults.set("", forKey: "pinboardsText")
+        let settings = AppSettings(defaults: defaults)
+        let work = try #require(settings.createCustomPinboard(name: "Work", color: .amber))
+        let ideas = try #require(settings.createCustomPinboard(name: "Ideas", color: .green))
+
+        #expect(settings.updateCustomPinboard(named: "Work", newName: "  Project  ", color: .amber))
+        #expect(settings.customPinboards == [
+            CustomPinboard(name: "Project", color: .amber),
+            CustomPinboard(name: "Ideas", color: .green)
+        ])
+
+        #expect(settings.updateCustomPinboard(named: "Project", newName: "Project", color: .blue))
+        #expect(settings.customPinboards.first?.color == .blue)
+
+        #expect(settings.updateCustomPinboard(named: "Project", newName: "Roadmap", color: .pink))
+        #expect(settings.customPinboards.first == CustomPinboard(name: "Roadmap", color: .pink))
+        #expect(!settings.customPinboards.contains(work))
+
+        let relaunched = AppSettings(defaults: defaults)
+        #expect(relaunched.customPinboards == [
+            CustomPinboard(name: "Roadmap", color: .pink),
+            CustomPinboard(name: "Ideas", color: .green)
+        ])
+    }
+
+    @Test func updateCustomPinboardRejectsInvalidNamesAndMissingPinboards() throws {
+        let defaults = temporaryDefaults()
+        defaults.set("", forKey: "pinboardsText")
+        let settings = AppSettings(defaults: defaults)
+        let work = try #require(settings.createCustomPinboard(name: "Work", color: .amber))
+        _ = try #require(settings.createCustomPinboard(name: "Ideas", color: .green))
+
+        #expect(!settings.updateCustomPinboard(named: "Work", newName: "   ", color: .blue))
+        #expect(!settings.updateCustomPinboard(named: "Work", newName: "Ideas", color: .blue))
+        #expect(!settings.updateCustomPinboard(named: "  Ideas  ", newName: "Work", color: .blue))
+        #expect(!settings.updateCustomPinboard(named: "Missing", newName: "Whatever", color: .blue))
+
+        #expect(settings.updateCustomPinboard(named: "Work", newName: "Work", color: .blue))
+        #expect(settings.customPinboards.contains(CustomPinboard(name: "Work", color: .blue)))
+        #expect(settings.customPinboards.contains(CustomPinboard(name: "Ideas", color: .green)))
+    }
+
+    @Test func updateCustomPinboardValidationMatchesCreationSemantics() throws {
+        let defaults = temporaryDefaults()
+        defaults.set("", forKey: "pinboardsText")
+        let settings = AppSettings(defaults: defaults)
+        _ = try #require(settings.createCustomPinboard(name: "Work", color: .amber))
+        _ = try #require(settings.createCustomPinboard(name: "Ideas", color: .green))
+
+        #expect(settings.updateCustomPinboard(named: "Work", newName: "work", color: .amber))
+        #expect(settings.customPinboards.contains(CustomPinboard(name: "work", color: .amber)))
+        #expect(settings.customPinboards.contains(CustomPinboard(name: "Ideas", color: .green)))
+
+        #expect(!settings.updateCustomPinboard(named: "work", newName: "Ideas", color: .amber))
+        #expect(!settings.updateCustomPinboard(named: "work", newName: "  ", color: .amber))
+    }
+
     private func temporaryDefaults() -> UserDefaults {
         let suiteName = "AppSettingsPinboardTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

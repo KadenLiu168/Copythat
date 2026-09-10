@@ -110,6 +110,29 @@ final class AppSettings: ObservableObject {
             !customPinboards.contains(where: { $0.name == normalizedName })
     }
 
+    func updateCustomPinboard(named name: String, newName: String, color: PinboardColorToken) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = customPinboards.firstIndex(where: { $0.name == trimmedName }) else {
+            return false
+        }
+
+        let trimmedNewName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedNewName.isEmpty,
+              !customPinboards.contains(where: { $0.name == trimmedNewName && $0.name != trimmedName }) else {
+            return false
+        }
+
+        customPinboards[index] = CustomPinboard(name: trimmedNewName, color: color)
+        return true
+    }
+
+    func canUpdateCustomPinboard(named name: String, newName: String) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNewName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedNewName.isEmpty &&
+            !customPinboards.contains(where: { $0.name == trimmedNewName && $0.name != trimmedName })
+    }
+
     func deleteCustomPinboard(named name: String) -> Bool {
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let index = customPinboards.firstIndex(where: { $0.name == normalizedName }) else {
