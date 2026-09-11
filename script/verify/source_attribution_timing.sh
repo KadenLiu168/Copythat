@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DEFAULT_EVIDENCE="$ROOT_DIR/openspec/changes/fix-source-attribution-timing/evidence/source-attribution-events.jsonl"
+DEFAULT_EVIDENCE="$ROOT_DIR/.build/source-attribution-events.jsonl"
 
 cleanup_live_session() {
     local log_pid="$1"

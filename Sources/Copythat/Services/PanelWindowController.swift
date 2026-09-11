@@ -129,11 +129,25 @@ final class PanelWindowController {
     }
 
     private func isPasteTargetCandidate(_ application: NSRunningApplication) -> Bool {
-        guard application.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+        Self.isPasteTargetCandidate(
+            processIdentifier: application.processIdentifier,
+            currentProcessIdentifier: ProcessInfo.processInfo.processIdentifier,
+            bundleIdentifier: application.bundleIdentifier,
+            copythatBundleIdentifier: Bundle.main.bundleIdentifier
+        )
+    }
+
+    static func isPasteTargetCandidate(
+        processIdentifier: pid_t,
+        currentProcessIdentifier: pid_t,
+        bundleIdentifier: String?,
+        copythatBundleIdentifier: String?
+    ) -> Bool {
+        guard processIdentifier != currentProcessIdentifier else {
             return false
         }
-        switch application.bundleIdentifier {
-        case Bundle.main.bundleIdentifier, "com.apple.systemuiserver":
+        switch bundleIdentifier {
+        case copythatBundleIdentifier, "com.apple.systemuiserver":
             return false
         default:
             return true

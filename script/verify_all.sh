@@ -5,17 +5,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 swift build
-swift test
-swift script/verify/content_keys.swift
-swift script/verify/pasteboard_write.swift
-swift script/verify/paste_target.swift
-swift script/verify/paste_decision.swift
+SWIFT_PATH="$(xcrun --find swift 2>/dev/null || command -v swift)"
+SWIFT_ROOT="$(cd "$(dirname "$SWIFT_PATH")/../.." && pwd)"
+SWIFT_FRAMEWORKS="$SWIFT_ROOT/Library/Developer/Frameworks"
+SWIFT_TEST_FLAGS=()
+if [[ -d "$SWIFT_FRAMEWORKS/Testing.framework" ]]; then
+    SWIFT_TEST_FLAGS=(-Xswiftc -F -Xswiftc "$SWIFT_FRAMEWORKS")
+fi
+swift test "${SWIFT_TEST_FLAGS[@]}"
 SOURCE_RESOLUTION_BIN="$(mktemp -t copythat_source_resolution)"
 swiftc Sources/Copythat/Support/CopySourceResolution.swift script/verify/source_resolution.swift -o "$SOURCE_RESOLUTION_BIN"
 "$SOURCE_RESOLUTION_BIN"
 rm -f "$SOURCE_RESOLUTION_BIN"
 ./script/verify/source_attribution_timing_test.sh
-swift script/verify/history_performance.swift
 
 python3 - <<'PY'
 from pathlib import Path

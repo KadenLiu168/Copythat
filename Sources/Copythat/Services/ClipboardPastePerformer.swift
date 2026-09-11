@@ -3,6 +3,26 @@ import ApplicationServices
 import Carbon
 import Foundation
 
+enum PasteDecision: Equatable {
+    case showRestoreFailure
+    case showMissingTarget
+    case showAccessibilityFailure
+    case sendPaste
+}
+
+func pasteDecision(didWrite: Bool, hasTargetApp: Bool, accessibilityTrusted: Bool) -> PasteDecision {
+    guard didWrite else {
+        return .showRestoreFailure
+    }
+    guard hasTargetApp else {
+        return .showMissingTarget
+    }
+    guard accessibilityTrusted else {
+        return .showAccessibilityFailure
+    }
+    return .sendPaste
+}
+
 @MainActor
 final class ClipboardPastePerformer {
     private let store: ClipboardStore
@@ -13,24 +33,32 @@ final class ClipboardPastePerformer {
 
     func paste(_ item: ClipboardItem, into targetApp: NSRunningApplication?) -> Bool {
         store.clearPermissionMessage()
-        guard store.writeToPasteboard(item) else {
+        let didWrite = store.writeToPasteboard(item)
+        let hasTargetApp = targetApp != nil
+        let accessibilityTrusted = didWrite && hasTargetApp && AccessibilityService.requestIfNeeded()
+
+        switch pasteDecision(
+            didWrite: didWrite,
+            hasTargetApp: hasTargetApp,
+            accessibilityTrusted: accessibilityTrusted
+        ) {
+        case .showRestoreFailure:
             store.permissionMessage = "This clipboard item could not be restored."
             return false
-        }
-        guard let targetApp else {
+        case .showMissingTarget:
             store.permissionMessage = "The item was copied, but no target app was available to paste into."
             return false
-        }
-        guard AccessibilityService.requestIfNeeded() else {
+        case .showAccessibilityFailure:
             store.permissionMessage = "Accessibility permission is off. The item was copied to the clipboard."
             return false
+        case .sendPaste:
+            guard let targetApp else { return false }
+            targetApp.activate(options: [.activateAllWindows])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                self.sendCommandV()
+            }
+            return true
         }
-
-        targetApp.activate(options: [.activateAllWindows])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            self.sendCommandV()
-        }
-        return true
     }
 
     private func sendCommandV() {

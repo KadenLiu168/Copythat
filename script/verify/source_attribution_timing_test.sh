@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ANALYZER="$ROOT_DIR/script/verify/source_attribution_timing.sh"
 FIXTURES="$ROOT_DIR/script/verify/fixtures/source_attribution_timing"
+EXPECTED_DEFAULT_EVIDENCE="$ROOT_DIR/.build/source-attribution-events.jsonl"
+
+source "$ANALYZER"
+if [[ "$DEFAULT_EVIDENCE" != "$EXPECTED_DEFAULT_EVIDENCE" ]]; then
+    echo "default evidence path is not rooted in the current checkout" >&2
+    exit 1
+fi
 
 assert_passes() {
     local mode="$1"
