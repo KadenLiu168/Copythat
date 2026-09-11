@@ -35,9 +35,8 @@ struct ClipboardCardViewTests {
         let visibleCard = card(text: "Private launch token", hidesPreview: false)
         let hiddenCard = card(text: "Private launch token", hidesPreview: true)
 
-        #expect(!visibleCard.previewContentIsHidden)
-        #expect(hiddenCard.previewContentIsHidden)
-        #expect(hiddenCard.concealedPreviewTitle == "Preview Hidden")
+        #expect(!visibleCard.hidesPreview)
+        #expect(hiddenCard.hidesPreview)
         #expect(visibleCard != hiddenCard)
     }
 

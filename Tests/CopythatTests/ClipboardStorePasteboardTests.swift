@@ -112,9 +112,27 @@ struct ClipboardStorePasteboardTests {
         #expect(store.writeToPasteboard(text))
         #expect(pasteboard.string(forType: .string) == "restore me")
 
+        let url = item(kind: .url, textValue: "https://example.com/restore")
+        #expect(store.writeToPasteboard(url))
+        #expect(pasteboard.string(forType: .string) == "https://example.com/restore")
+
         let image = item(kind: .image, imageData: testImage().pngData(maxPixel: 10))
         #expect(store.writeToPasteboard(image))
         #expect(pasteboard.readObjects(forClasses: [NSImage.self], options: nil)?.isEmpty == false)
+    }
+
+    @Test func invalidRestoreDoesNotAdvancePasteboardMonitor() throws {
+        let (store, pasteboard) = makeStore()
+        pasteboard.clearContents()
+        pasteboard.setString("pending external text", forType: .string)
+        store.pollPasteboard()
+
+        let invalidText = item(kind: .text, textValue: "", preview: "")
+        #expect(!store.writeToPasteboard(invalidText))
+
+        store.pollPasteboard()
+
+        #expect(store.items.map(\.textValue) == ["pending external text"])
     }
 
     @Test func capturesImageThroughTheAsynchronousEncodingPath() async throws {

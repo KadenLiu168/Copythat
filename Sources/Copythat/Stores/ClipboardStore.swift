@@ -221,28 +221,25 @@ final class ClipboardStore: ObservableObject {
     }
 
     func writeToPasteboard(_ item: ClipboardItem) -> Bool {
+        let didWrite: Bool
         switch item.kind {
         case .text, .url:
             let string = item.textValue ?? item.preview
             guard !string.isEmpty else { return false }
             pasteboard.clearContents()
-            let didWrite = pasteboard.setString(string, forType: .string)
-            markPasteboardProcessed()
-            return didWrite
+            didWrite = pasteboard.setString(string, forType: .string)
         case .file:
             let existingFileURLs = item.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
             guard !existingFileURLs.isEmpty else { return false }
             pasteboard.clearContents()
-            let didWrite = pasteboard.writeObjects(existingFileURLs as [NSURL])
-            markPasteboardProcessed()
-            return didWrite
+            didWrite = pasteboard.writeObjects(existingFileURLs as [NSURL])
         case .image:
             guard let image = item.image else { return false }
             pasteboard.clearContents()
-            let didWrite = pasteboard.writeObjects([image])
-            markPasteboardProcessed()
-            return didWrite
+            didWrite = pasteboard.writeObjects([image])
         }
+        markPasteboardProcessed()
+        return didWrite
     }
 
     private var ignoredApplications: [String] {

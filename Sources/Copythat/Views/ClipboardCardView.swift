@@ -266,7 +266,7 @@ struct ClipboardCardView: View, Equatable {
                         .fill(sourceAccent.opacity(0.12))
                 )
 
-            Text(concealedPreviewTitle)
+            Text("Preview Hidden")
                 .font(CopythatFont.font(size: 13, weight: .semibold))
                 .foregroundStyle(primaryText.opacity(0.82))
                 .lineLimit(1)
@@ -279,14 +279,6 @@ struct ClipboardCardView: View, Equatable {
         }
         .padding(.horizontal, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    var previewContentIsHidden: Bool {
-        hidesPreview
-    }
-
-    var concealedPreviewTitle: String {
-        "Preview Hidden"
     }
 
     private var linkDisplayTitle: String {

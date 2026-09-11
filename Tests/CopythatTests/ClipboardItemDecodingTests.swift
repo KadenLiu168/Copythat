@@ -21,6 +21,8 @@ struct ClipboardItemDecodingTests {
 
         #expect(decoded.count == 1)
         #expect(decoded[0].fileURLs.isEmpty)
+        #expect(decoded[0].imageData == nil)
+        #expect(decoded[0].sourceAppIconData == nil)
         #expect(decoded[0].pinboardName == nil)
         #expect(decoded[0].linkTitle == nil)
         #expect(decoded[0].isPinned)
