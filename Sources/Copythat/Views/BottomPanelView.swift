@@ -91,13 +91,18 @@ struct BottomPanelView: View {
                 Text(pinboardDeletionMessage(for: request))
             }
             .popover(item: $pinboardEditRequest, arrowEdge: .top) { request in
-                EditPinboardPopover(
-                    settings: settings,
-                    pinboard: request.pinboard,
-                    onCancel: { pinboardEditRequest = nil },
-                    onSave: { name, color in
-                        confirmPinboardEdit(request, newName: name, color: color)
-                    }
+                PinboardEditorPopover(
+                    configuration: PinboardEditorConfiguration(
+                        title: "Edit Pinboard",
+                        actionTitle: "Save",
+                        initialName: request.pinboard.name,
+                        initialColor: request.pinboard.color,
+                        isNameValid: { settings.canUpdateCustomPinboard(named: request.pinboard.name, newName: $0) },
+                        onCancel: { pinboardEditRequest = nil },
+                        onComplete: { name, color in
+                            confirmPinboardEdit(request, newName: name, color: color)
+                        }
+                    )
                 )
             }
     }
@@ -359,13 +364,20 @@ struct BottomPanelView: View {
             isCreatingPinboard = true
         }
         .popover(isPresented: $isCreatingPinboard, arrowEdge: .top) {
-            NewPinboardPopover(
-                settings: settings,
-                onCancel: { isCreatingPinboard = false },
-                onCreate: { pinboard in
-                    isCreatingPinboard = false
-                    store.selectedBoardID = Pinboard.custom(pinboard.name).id
-                }
+            PinboardEditorPopover(
+                configuration: PinboardEditorConfiguration(
+                    title: "New Pinboard",
+                    actionTitle: "Create",
+                    initialName: "",
+                    initialColor: .amber,
+                    isNameValid: { settings.canCreateCustomPinboard(named: $0) },
+                    onCancel: { isCreatingPinboard = false },
+                    onComplete: { name, color in
+                        guard let pinboard = settings.createCustomPinboard(name: name, color: color) else { return }
+                        isCreatingPinboard = false
+                        store.selectedBoardID = Pinboard.custom(pinboard.name).id
+                    }
+                )
             )
         }
     }
@@ -569,106 +581,37 @@ private struct PinboardEditRequest: Identifiable {
     var id: String { pinboard.name }
 }
 
-private struct NewPinboardPopover: View {
-    @ObservedObject var settings: AppSettings
+private struct PinboardEditorConfiguration {
+    let title: String
+    let actionTitle: String
+    let initialName: String
+    let initialColor: PinboardColorToken
+    let isNameValid: (String) -> Bool
     let onCancel: () -> Void
-    let onCreate: (CustomPinboard) -> Void
-    @State private var name = ""
-    @State private var selectedColor = PinboardColorToken.amber
-    @FocusState private var nameFocused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New Pinboard")
-                .font(CopythatFont.font(size: 15, weight: .semibold))
-
-            TextField("Pinboard name", text: $name)
-                .textFieldStyle(.roundedBorder)
-                .focused($nameFocused)
-                .onSubmit(create)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Color")
-                    .font(CopythatFont.font(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    ForEach(PinboardColorToken.allCases) { color in
-                        Button {
-                            selectedColor = color
-                        } label: {
-                            Circle()
-                                .fill(Color(nsColor: color.color))
-                                .frame(width: 20, height: 20)
-                                .padding(3)
-                                .overlay {
-                                    Circle()
-                                        .stroke(.primary.opacity(selectedColor == color ? 0.62 : 0), lineWidth: 1.5)
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .help(color.rawValue.capitalized)
-                    }
-                }
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Button("Create", action: create)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!settings.canCreateCustomPinboard(named: name))
-            }
-        }
-        .padding(16)
-        .frame(width: 250)
-        .onAppear {
-            DispatchQueue.main.async {
-                nameFocused = true
-            }
-        }
-        .onExitCommand(perform: onCancel)
-    }
-
-    private func create() {
-        guard let pinboard = settings.createCustomPinboard(name: name, color: selectedColor) else { return }
-        onCreate(pinboard)
-    }
+    let onComplete: (String, PinboardColorToken) -> Void
 }
 
-private struct EditPinboardPopover: View {
-    @ObservedObject var settings: AppSettings
-    let currentName: String
-    let onCancel: () -> Void
-    let onSave: (String, PinboardColorToken) -> Void
+private struct PinboardEditorPopover: View {
+    let configuration: PinboardEditorConfiguration
     @State private var name: String
     @State private var selectedColor: PinboardColorToken
     @FocusState private var nameFocused: Bool
 
-    init(
-        settings: AppSettings,
-        pinboard: CustomPinboard,
-        onCancel: @escaping () -> Void,
-        onSave: @escaping (String, PinboardColorToken) -> Void
-    ) {
-        self.settings = settings
-        self.currentName = pinboard.name
-        self.onCancel = onCancel
-        self.onSave = onSave
-        _name = State(initialValue: pinboard.name)
-        _selectedColor = State(initialValue: pinboard.color)
+    init(configuration: PinboardEditorConfiguration) {
+        self.configuration = configuration
+        _name = State(initialValue: configuration.initialName)
+        _selectedColor = State(initialValue: configuration.initialColor)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Edit Pinboard")
+            Text(configuration.title)
                 .font(CopythatFont.font(size: 15, weight: .semibold))
 
             TextField("Pinboard name", text: $name)
                 .textFieldStyle(.roundedBorder)
                 .focused($nameFocused)
-                .onSubmit(save)
+                .onSubmit(complete)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Color")
@@ -697,11 +640,11 @@ private struct EditPinboardPopover: View {
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
+                Button("Cancel", action: configuration.onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Save", action: save)
+                Button(configuration.actionTitle, action: complete)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!settings.canUpdateCustomPinboard(named: currentName, newName: name))
+                    .disabled(!configuration.isNameValid(name))
             }
         }
         .padding(16)
@@ -711,11 +654,12 @@ private struct EditPinboardPopover: View {
                 nameFocused = true
             }
         }
-        .onExitCommand(perform: onCancel)
+        .onExitCommand(perform: configuration.onCancel)
     }
 
-    private func save() {
-        onSave(name, selectedColor)
+    private func complete() {
+        guard configuration.isNameValid(name) else { return }
+        configuration.onComplete(name, selectedColor)
     }
 }
 
