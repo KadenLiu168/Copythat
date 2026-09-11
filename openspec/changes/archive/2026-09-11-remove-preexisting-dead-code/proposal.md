@@ -30,6 +30,19 @@ None. This cleanup does not change user-observable requirements.
 - **Behavior and data:** no changes to pasteboard capture, source attribution, image storage, card theme-color extraction, settings, persistence formats, or generated assets.
 - **Verification:** implementation must pass `swift build` and `./script/verify_all.sh`; generated icon output should also be confirmed unchanged.
 
+## Design
+
+No `design.md`, deliberately. The design artifact is conditional: it is written
+only for a cross-cutting change, a new architectural pattern or dependency,
+significant data-model change, or security, performance, or migration
+complexity. This change is none of those. It does not cross Swift modules, adds
+no dependency, and leaves permissions, persistence, pasteboard behavior, source
+attribution, window management, and global shortcuts untouched; it only deletes
+declarations that nothing references. The project design rule in
+`openspec/config.yaml` and the schema's conditional design gate therefore both
+resolve to "omit". The decisions worth recording already live in **What
+Changes** and **Non-goals**.
+
 ## Non-goals
 
 - Consolidating the semantically distinct generic-image, source-app-icon, and detached `CGImage` PNG encoding paths.
