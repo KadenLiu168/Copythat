@@ -13,10 +13,6 @@ enum CopythatIcon {
         return image
     }
 
-    static func transparentMark() -> NSImage? {
-        image(named: "AppIcon-transparent")
-    }
-
     private static func image(named name: String) -> NSImage? {
         guard let url = resourceBundle.url(forResource: name, withExtension: "png") else {
             return nil

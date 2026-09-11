@@ -81,10 +81,6 @@ def make_app_icon(size):
     return source_logo().resize((size, size), RESAMPLE)
 
 
-def make_transparent_icon(size):
-    return make_app_icon(size)
-
-
 def make_menu_bar_mask():
     logo = source_logo()
     mask = Image.new("L", logo.size, 0)
@@ -149,7 +145,7 @@ def save_icons():
         make_app_icon(size).save(ICONSET_DIR / filename)
 
     make_app_icon(1024).save(RESOURCES / "AppIcon-1024.png")
-    make_transparent_icon(1024).save(RESOURCES / "AppIcon-transparent.png")
+    make_app_icon(1024).save(RESOURCES / "AppIcon-transparent.png")
     make_menu_bar_icon().save(RESOURCES / "MenuBarIconTemplate.png")
 
     subprocess.run(

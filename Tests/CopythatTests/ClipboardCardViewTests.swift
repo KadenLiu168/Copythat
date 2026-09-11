@@ -8,8 +8,8 @@ struct ClipboardCardViewTests {
         let redCard = card(text: "First text", icon: solidIcon(red: 0.92, green: 0.16, blue: 0.12))
         let blueCard = card(text: "Second text", icon: solidIcon(red: 0.10, green: 0.42, blue: 0.92))
 
-        let redColor = try #require(redCard.sourceIconForDisplay?.representativeColor)
-        let blueColor = try #require(blueCard.sourceIconForDisplay?.representativeColor)
+        let redColor = try #require(redCard.sourceIconForDisplay.flatMap(centerColor))
+        let blueColor = try #require(blueCard.sourceIconForDisplay.flatMap(centerColor))
 
         #expect(redColor.isRedDominant)
         #expect(blueColor.isBlueDominant)
@@ -155,6 +155,20 @@ struct ClipboardCardViewTests {
         image.addRepresentation(bitmap)
         return image
     }
+}
+
+/// Samples the center pixel of a solid-color icon. The card tests only need to
+/// prove that each card surfaces its own captured source icon, so a single
+/// pixel is enough and keeps this assertion independent of production helpers.
+private func centerColor(of image: NSImage) -> NSColor? {
+    guard let tiffData = image.tiffRepresentation,
+          let bitmap = NSBitmapImageRep(data: tiffData) else {
+        return nil
+    }
+
+    let x = bitmap.pixelsWide / 2
+    let y = bitmap.pixelsHigh / 2
+    return bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
 }
 
 private extension NSColor {

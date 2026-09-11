@@ -185,27 +185,3 @@ private extension Data {
             .joined()
     }
 }
-
-extension ClipboardItem {
-    static func sample(_ index: Int, kind: ClipboardKind) -> ClipboardItem {
-        ClipboardItem(
-            id: UUID(),
-            kind: kind,
-            title: ["Design notes", "openai.com", "Screenshot", "Project brief.pdf"][index % 4],
-            preview: [
-                "Copythat-style clipboard history with fast search and pinned groups.",
-                "https://openai.com",
-                "PNG image, 1440 x 900",
-                "/Users/kaden/Documents/Project brief.pdf"
-            ][index % 4],
-            sourceApp: ["Safari", "Xcode", "Preview", "Finder"][index % 4],
-            sourceAppIconData: nil,
-            createdAt: Date().addingTimeInterval(Double(-index * 180)),
-            isPinned: index == 1,
-            pinboardName: index == 1 ? "Work" : nil,
-            textValue: kind == .image ? nil : "Sample clipboard content \(index)",
-            fileURLs: [],
-            imageData: nil
-        )
-    }
-}
