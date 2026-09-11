@@ -188,8 +188,6 @@ cat >"$INFO_PLIST" <<PLIST
   <string>Copythat uses automation only when needed to return copied content to the app you selected.</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
-  <key>NSScreenCaptureUsageDescription</key>
-  <string>Copythat checks window positions so the clipboard panel can appear near the active workspace.</string>
 </dict>
 </plist>
 PLIST

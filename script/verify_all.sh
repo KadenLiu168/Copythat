@@ -55,7 +55,7 @@ assert info["CFBundleExecutable"] == "Copythat", info
 assert info["CFBundleIdentifier"] == "local.copythat.clipboard", info
 assert info["LSUIElement"] is True, "Copythat should run as a menu bar resident app"
 assert "NSAppleEventsUsageDescription" in info, info
-assert "NSScreenCaptureUsageDescription" in info, info
+assert "NSScreenCaptureUsageDescription" not in info, info
 print("bundle ok", info["CFBundleIdentifier"], "LSUIElement", info["LSUIElement"])
 PY
 

@@ -3,6 +3,7 @@ from collections import deque
 from functools import lru_cache
 from pathlib import Path
 import subprocess
+from tempfile import TemporaryDirectory
 
 from PIL import Image
 
@@ -10,7 +11,6 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCES = ROOT / "Sources" / "Copythat" / "Resources"
 ASSET_DIR = RESOURCES / "Assets.xcassets" / "AppIcon.appiconset"
-ICONSET_DIR = RESOURCES / "AppIcon.iconset"
 LOGO_SOURCE = ROOT / "script" / "assets" / "Copythat.png"
 DARK_EDGE_THRESHOLD = 56
 MENU_BAR_SIZE = 64
@@ -124,7 +124,6 @@ def make_menu_bar_icon(size=MENU_BAR_SIZE):
 
 def save_icons():
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
-    ICONSET_DIR.mkdir(parents=True, exist_ok=True)
 
     for size in (16, 32, 64, 128, 256, 512, 1024):
         make_app_icon(size).save(ASSET_DIR / f"icon_{size}.png")
@@ -141,17 +140,19 @@ def save_icons():
         "icon_512x512.png": 512,
         "icon_512x512@2x.png": 1024,
     }
-    for filename, size in iconset_sizes.items():
-        make_app_icon(size).save(ICONSET_DIR / filename)
+    with TemporaryDirectory(prefix="copythat-iconset-") as temporary_directory:
+        iconset_dir = Path(temporary_directory) / "AppIcon.iconset"
+        iconset_dir.mkdir()
+        for filename, size in iconset_sizes.items():
+            make_app_icon(size).save(iconset_dir / filename)
 
-    make_app_icon(1024).save(RESOURCES / "AppIcon-1024.png")
-    make_app_icon(1024).save(RESOURCES / "AppIcon-transparent.png")
-    make_menu_bar_icon().save(RESOURCES / "MenuBarIconTemplate.png")
+        make_app_icon(1024).save(RESOURCES / "AppIcon-transparent.png")
+        make_menu_bar_icon().save(RESOURCES / "MenuBarIconTemplate.png")
 
-    subprocess.run(
-        ["iconutil", "-c", "icns", str(ICONSET_DIR), "-o", str(RESOURCES / "AppIcon.icns")],
-        check=True,
-    )
+        subprocess.run(
+            ["iconutil", "-c", "icns", str(iconset_dir), "-o", str(RESOURCES / "AppIcon.icns")],
+            check=True,
+        )
 
 
 if __name__ == "__main__":
