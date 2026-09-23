@@ -231,6 +231,7 @@ struct ClipboardStoreSelectionTests {
     }
 
     @Test func pasteboardCaptureWaitsForStableFinalChangeCount() {
+        let clock = MutableClock()
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         let store = ClipboardStore(
@@ -238,7 +239,8 @@ struct ClipboardStoreSelectionTests {
             sourceTracker: CopySourceTracker(),
             initialItems: [],
             pasteboard: pasteboard,
-            persistItems: { _ in }
+            persistItems: { _ in },
+            uptimeProvider: { clock.now }
         )
 
         pasteboard.clearContents()
@@ -248,6 +250,7 @@ struct ClipboardStoreSelectionTests {
         pasteboard.clearContents()
         pasteboard.setString("final chatgpt text", forType: .string)
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(store.items.count == 1)

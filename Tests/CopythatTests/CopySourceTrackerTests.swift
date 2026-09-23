@@ -1,4 +1,7 @@
 @testable import Copythat
+import AppKit
+import Carbon
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -86,6 +89,69 @@ struct CopySourceTrackerTests {
         let snapshot = tracker.frontmostSourceSnapshot(pasteboardChangeCount: 10)
 
         #expect(snapshot?.appName == "App B")
+    }
+
+    @Test func recognizedCopyAndCutShortcutsDeliverExactlyOneWake() {
+        let tracker = CopySourceTracker(frontmostSourceProvider: { nil })
+        var wakes = 0
+        tracker.onCopyIntentWake = { wakes += 1 }
+
+        tracker.handle(type: .keyDown, event: keyDown(keyCode: kVK_ANSI_C, flags: .maskCommand))
+        tracker.handle(type: .keyDown, event: keyDown(keyCode: kVK_ANSI_X, flags: .maskCommand))
+
+        #expect(wakes == 2, "each supported copy/cut intent must deliver exactly one wake")
+    }
+
+    @Test func screenshotShortcutDeliversWakeWithSystemSourceQueued() {
+        let tracker = CopySourceTracker(frontmostSourceProvider: { nil })
+        var wakes = 0
+        tracker.onCopyIntentWake = { wakes += 1 }
+
+        tracker.handle(
+            type: .keyDown,
+            event: keyDown(keyCode: kVK_ANSI_3, flags: [.maskCommand, .maskControl, .maskShift])
+        )
+
+        #expect(wakes == 1)
+        let baseline = NSPasteboard.general.changeCount
+        let resolved = tracker.resolveSource(currentPasteboardChangeCount: baseline + 1)
+        #expect(resolved.appName == "System")
+    }
+
+    @Test func unrelatedKeyDownDoesNotWake() {
+        let tracker = CopySourceTracker(frontmostSourceProvider: { nil })
+        var wakes = 0
+        tracker.onCopyIntentWake = { wakes += 1 }
+
+        tracker.handle(type: .keyDown, event: keyDown(keyCode: kVK_ANSI_D, flags: .maskCommand))
+        tracker.handle(type: .keyDown, event: keyDown(keyCode: kVK_ANSI_C, flags: [.maskCommand, .maskControl]))
+        tracker.handle(type: .flagsChanged, event: keyDown(keyCode: kVK_ANSI_C, flags: .maskCommand))
+
+        #expect(wakes == 0)
+    }
+
+    @Test func shortcutEvidenceIsQueuedBeforeWakeDelivery() {
+        let chromeSource = ClipboardSource(appName: "Chrome", iconData: nil, capturedAt: Date())
+        var sources: [ClipboardSource?] = [chromeSource, nil]
+        let tracker = CopySourceTracker(frontmostSourceProvider: { sources.removeFirst() })
+        var wakes = 0
+        tracker.onCopyIntentWake = { wakes += 1 }
+
+        tracker.handle(type: .keyDown, event: keyDown(keyCode: kVK_ANSI_C, flags: .maskCommand))
+
+        #expect(wakes == 1)
+        let baseline = NSPasteboard.general.changeCount
+        let resolved = tracker.resolveSource(currentPasteboardChangeCount: baseline + 1)
+        #expect(
+            resolved.appName == "Chrome",
+            "the shortcut source queued during wake handling must resolve after the wake"
+        )
+    }
+
+    private func keyDown(keyCode: Int, flags: CGEventFlags) -> CGEvent {
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(keyCode), keyDown: true)
+        event?.flags = flags
+        return event!
     }
 
     private func source(

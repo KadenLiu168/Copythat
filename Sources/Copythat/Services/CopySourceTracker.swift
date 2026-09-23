@@ -41,6 +41,18 @@ private extension ClipboardSource {
 }
 
 final class CopySourceTracker {
+    // Narrow copy-intent wake signal; wired by AppModel to the clipboard store.
+    var onCopyIntentWake: (() -> Void)?
+
+    // Verification-only seam (D3/D4): when set, its result replaces the real
+    // CGEvent.tapCreate call. Production code leaves it nil; only the live
+    // verification driver injects a failure to exercise the idle fallback.
+    var eventTapFactory: (() -> CFMachPort?)?
+
+    // Metadata-only observation (D3): whether the copy-intent event tap was
+    // created successfully. Never drives capture; observation only.
+    private(set) var isEventTapActive = false
+
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var activationObserver: NSObjectProtocol?
@@ -66,25 +78,33 @@ final class CopySourceTracker {
         guard eventTap == nil else { return }
 
         let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,
-            eventsOfInterest: mask,
-            callback: { _, type, event, userInfo in
-                guard let userInfo else {
+        let tap: CFMachPort?
+        if let eventTapFactory {
+            tap = eventTapFactory()
+        } else {
+            tap = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .listenOnly,
+                eventsOfInterest: mask,
+                callback: { _, type, event, userInfo in
+                    guard let userInfo else {
+                        return Unmanaged.passUnretained(event)
+                    }
+                    let tracker = Unmanaged<CopySourceTracker>.fromOpaque(userInfo).takeUnretainedValue()
+                    tracker.handle(type: type, event: event)
                     return Unmanaged.passUnretained(event)
-                }
-                let tracker = Unmanaged<CopySourceTracker>.fromOpaque(userInfo).takeUnretainedValue()
-                tracker.handle(type: type, event: event)
-                return Unmanaged.passUnretained(event)
-            },
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
+                },
+                userInfo: Unmanaged.passUnretained(self).toOpaque()
+            )
+        }
+        guard let tap else {
+            isEventTapActive = false
             return
         }
 
         eventTap = tap
+        isEventTapActive = true
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         if let runLoopSource {
             CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
@@ -157,7 +177,7 @@ final class CopySourceTracker {
         CFRunLoopRunInMode(.defaultMode, 0, true)
     }
 
-    private func handle(type: CGEventType, event: CGEvent) {
+    func handle(type: CGEventType, event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
@@ -172,20 +192,25 @@ final class CopySourceTracker {
 
         if isScreenshotToClipboardShortcut(keyCode: keyCode, flags: flags) {
             appendPendingShortcutSource(.system(pasteboardChangeCount: pasteboardChangeCount))
+            deliverCopyIntentWake()
             return
         }
 
-        guard isCopyOrCutShortcut(keyCode: keyCode, flags: flags),
-              let source = currentFrontmostSource(
-                capturedAt: Date(),
-                pasteboardChangeCount: pasteboardChangeCount
-              ) else {
-            return
+        guard isCopyOrCutShortcut(keyCode: keyCode, flags: flags) else { return }
+        let operation: ClipboardDiagnostics.ShortcutOperation = keyCode == kVK_ANSI_C ? .copy : .cut
+        // D2: queue available shortcut evidence before the wake so immediate polling
+        // cannot resolve ahead of its source evidence; a missing source still wakes.
+        if let source = currentFrontmostSource(
+            capturedAt: Date(),
+            pasteboardChangeCount: pasteboardChangeCount
+        ) {
+            recordShortcutSource(source, operation: operation)
         }
-        recordShortcutSource(
-            source,
-            operation: keyCode == kVK_ANSI_C ? .copy : .cut
-        )
+        deliverCopyIntentWake()
+    }
+
+    private func deliverCopyIntentWake() {
+        onCopyIntentWake?()
     }
 
     private func isCopyOrCutShortcut(keyCode: Int, flags: CGEventFlags) -> Bool {

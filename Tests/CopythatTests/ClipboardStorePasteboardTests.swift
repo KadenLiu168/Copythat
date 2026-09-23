@@ -6,14 +6,15 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct ClipboardStorePasteboardTests {
-    @Test func captureUsesTheStableSecondPoll() {
-        let (store, pasteboard) = makeStore()
+    @Test func captureWaitsForTheMinimumQuietDuration() {
+        let (store, pasteboard, clock) = makeStore()
         pasteboard.clearContents()
         pasteboard.setString("stable text", forType: .string)
 
         store.pollPasteboard()
         #expect(store.items.isEmpty)
 
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(store.items.count == 1)
@@ -22,12 +23,12 @@ struct ClipboardStorePasteboardTests {
     }
 
     @Test func capturesHTTPAndHTTPSURLs() {
-        let (store, pasteboard) = makeStore()
+        let (store, pasteboard, clock) = makeStore()
 
-        pollStable(store, pasteboard) { pasteboard in
+        pollStable(store, pasteboard, clock) { pasteboard in
             pasteboard.setString("http://127.0.0.1:1/http", forType: .string)
         }
-        pollStable(store, pasteboard) { pasteboard in
+        pollStable(store, pasteboard, clock) { pasteboard in
             pasteboard.setString("HTTPS://127.0.0.1:1/https", forType: .string)
         }
 
@@ -39,11 +40,11 @@ struct ClipboardStorePasteboardTests {
     }
 
     @Test func capturesExistingFileURLString() throws {
-        let (store, pasteboard) = makeStore()
+        let (store, pasteboard, clock) = makeStore()
         let fileURL = try temporaryFile()
         defer { try? FileManager.default.removeItem(at: fileURL) }
 
-        pollStable(store, pasteboard) { pasteboard in
+        pollStable(store, pasteboard, clock) { pasteboard in
             pasteboard.setString(fileURL.path, forType: .string)
         }
 
@@ -54,12 +55,12 @@ struct ClipboardStorePasteboardTests {
     }
 
     @Test func capturesFileObjects() throws {
-        let (store, pasteboard) = makeStore()
+        let (store, pasteboard, clock) = makeStore()
         let fileURL = try temporaryFile()
         defer { try? FileManager.default.removeItem(at: fileURL) }
 
         var didWrite = false
-        pollStable(store, pasteboard) { pasteboard in
+        pollStable(store, pasteboard, clock) { pasteboard in
             didWrite = pasteboard.writeObjects([fileURL as NSURL])
         }
 
@@ -70,14 +71,14 @@ struct ClipboardStorePasteboardTests {
     }
 
     @Test func ignoresEmptyAndUnsupportedPasteboardContent() {
-        let (store, pasteboard) = makeStore()
+        let (store, pasteboard, clock) = makeStore()
 
-        pollStable(store, pasteboard) { pasteboard in
+        pollStable(store, pasteboard, clock) { pasteboard in
             _ = pasteboard.setString("", forType: .string)
         }
         #expect(store.items.isEmpty)
 
-        pollStable(store, pasteboard) { pasteboard in
+        pollStable(store, pasteboard, clock) { pasteboard in
             _ = pasteboard.setData(
                 Data([1, 2, 3]),
                 forType: NSPasteboard.PasteboardType("com.copythat.tests.unsupported")
@@ -87,7 +88,7 @@ struct ClipboardStorePasteboardTests {
     }
 
     @Test func restoresSupportedItemsAndRejectsInvalidInputs() throws {
-        let (store, pasteboard) = makeStore()
+        let (store, pasteboard, _) = makeStore()
         pasteboard.setString("keep me", forType: .string)
 
         let emptyText = item(kind: .text, textValue: "", preview: "")
@@ -122,7 +123,7 @@ struct ClipboardStorePasteboardTests {
     }
 
     @Test func invalidRestoreDoesNotAdvancePasteboardMonitor() throws {
-        let (store, pasteboard) = makeStore()
+        let (store, pasteboard, clock) = makeStore()
         pasteboard.clearContents()
         pasteboard.setString("pending external text", forType: .string)
         store.pollPasteboard()
@@ -130,19 +131,21 @@ struct ClipboardStorePasteboardTests {
         let invalidText = item(kind: .text, textValue: "", preview: "")
         #expect(!store.writeToPasteboard(invalidText))
 
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(store.items.map(\.textValue) == ["pending external text"])
     }
 
     @Test func capturesImageThroughTheAsynchronousEncodingPath() async throws {
-        let (store, pasteboard) = makeStore()
+        let (store, pasteboard, clock) = makeStore()
         let image = testImage()
         pasteboard.clearContents()
         #expect(pasteboard.writeObjects([image]))
 
         store.pollPasteboard()
         #expect(store.items.isEmpty)
+        clock.advance(by: 1.0)
         store.pollPasteboard()
         #expect(store.items.isEmpty)
 
@@ -155,7 +158,8 @@ struct ClipboardStorePasteboardTests {
         #expect(item.imageData?.isEmpty == false)
     }
 
-    private func makeStore() -> (ClipboardStore, NSPasteboard) {
+    private func makeStore() -> (ClipboardStore, NSPasteboard, MutableClock) {
+        let clock = MutableClock()
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         let source = ClipboardSource(appName: "Tests", iconData: nil, capturedAt: Date())
@@ -164,19 +168,22 @@ struct ClipboardStorePasteboardTests {
             sourceTracker: CopySourceTracker(frontmostSourceProvider: { source }),
             initialItems: [],
             pasteboard: pasteboard,
-            persistItems: { _ in }
+            persistItems: { _ in },
+            uptimeProvider: { clock.now }
         )
-        return (store, pasteboard)
+        return (store, pasteboard, clock)
     }
 
     private func pollStable(
         _ store: ClipboardStore,
         _ pasteboard: NSPasteboard,
+        _ clock: MutableClock,
         write: (NSPasteboard) -> Void
     ) {
         pasteboard.clearContents()
         write(pasteboard)
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
     }
 

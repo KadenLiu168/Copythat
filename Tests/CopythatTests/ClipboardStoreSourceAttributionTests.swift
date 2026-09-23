@@ -10,6 +10,7 @@ struct ClipboardStoreSourceAttributionTests {
             source(named: "Source A"),
             source(named: "Confirmation B")
         ])
+        let clock = MutableClock()
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         var persistedItems: [ClipboardItem] = []
@@ -18,12 +19,14 @@ struct ClipboardStoreSourceAttributionTests {
             sourceTracker: CopySourceTracker(frontmostSourceProvider: orderedSources.next),
             initialItems: [],
             pasteboard: pasteboard,
-            persistItems: { persistedItems = $0 }
+            persistItems: { persistedItems = $0 },
+            uptimeProvider: { clock.now }
         )
 
         pasteboard.clearContents()
         pasteboard.setString("copied text", forType: .string)
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(persistedItems.count == 1)
@@ -34,6 +37,7 @@ struct ClipboardStoreSourceAttributionTests {
         let defaults = diagnosticsDefaults()
         var events: [ClipboardDiagnostics.SourceTimingEvent] = []
         let diagnostics = ClipboardDiagnostics(defaults: defaults, eventSink: { events.append($0) })
+        let clock = MutableClock()
         let orderedSources = OrderedFrontmostSources([
             source(named: "Source A"),
             source(named: "Confirmation B")
@@ -50,13 +54,15 @@ struct ClipboardStoreSourceAttributionTests {
             initialItems: [],
             pasteboard: pasteboard,
             diagnostics: diagnostics,
-            persistItems: { _ in }
+            persistItems: { _ in },
+            uptimeProvider: { clock.now }
         )
 
         pasteboard.clearContents()
         pasteboard.setString("copied text", forType: .string)
         let capturedChangeCount = pasteboard.changeCount
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(events.map(\.event) == [.pasteboardObserved, .sourceResolved])
@@ -72,11 +78,12 @@ struct ClipboardStoreSourceAttributionTests {
             source(named: "Source A"),
             source(named: "Confirmation B")
         ])
-        let (store, pasteboard) = makeStore(orderedSources: orderedSources)
+        let (store, pasteboard, clock) = makeStore(orderedSources: orderedSources)
 
         pasteboard.clearContents()
         pasteboard.setString("copied text", forType: .string)
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(store.items.first?.sourceApp == "Source A")
@@ -87,11 +94,12 @@ struct ClipboardStoreSourceAttributionTests {
             nil,
             source(named: "Confirmation B")
         ])
-        let (store, pasteboard) = makeStore(orderedSources: orderedSources)
+        let (store, pasteboard, clock) = makeStore(orderedSources: orderedSources)
 
         pasteboard.clearContents()
         pasteboard.setString("copied text", forType: .string)
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(store.items.first?.sourceApp == "Confirmation B")
@@ -103,7 +111,7 @@ struct ClipboardStoreSourceAttributionTests {
             source(named: "Source B"),
             source(named: "Confirmation C")
         ])
-        let (store, pasteboard) = makeStore(orderedSources: orderedSources)
+        let (store, pasteboard, clock) = makeStore(orderedSources: orderedSources)
 
         pasteboard.clearContents()
         pasteboard.setString("transient text", forType: .string)
@@ -112,6 +120,7 @@ struct ClipboardStoreSourceAttributionTests {
         pasteboard.clearContents()
         pasteboard.setString("final text", forType: .string)
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(store.items.first?.textValue == "final text")
@@ -124,7 +133,7 @@ struct ClipboardStoreSourceAttributionTests {
             source(named: "Later B"),
             source(named: "Confirmation C")
         ])
-        let (store, pasteboard) = makeStore(orderedSources: orderedSources)
+        let (store, pasteboard, clock) = makeStore(orderedSources: orderedSources)
 
         pasteboard.clearContents()
         pasteboard.setString("pending external text", forType: .string)
@@ -135,6 +144,7 @@ struct ClipboardStoreSourceAttributionTests {
         pasteboard.clearContents()
         pasteboard.setString("later external text", forType: .string)
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(store.items.first?.textValue == "later external text")
@@ -147,6 +157,7 @@ struct ClipboardStoreSourceAttributionTests {
             frontmostAfterSwitch,
             frontmostAfterSwitch
         ])
+        let clock = MutableClock()
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         let tracker = CopySourceTracker(frontmostSourceProvider: orderedSources.next)
@@ -155,7 +166,8 @@ struct ClipboardStoreSourceAttributionTests {
             sourceTracker: tracker,
             initialItems: [],
             pasteboard: pasteboard,
-            persistItems: { _ in }
+            persistItems: { _ in },
+            uptimeProvider: { clock.now }
         )
 
         tracker.recordActivatedSource(source(named: "App A"), currentChangeCount: pasteboard.changeCount)
@@ -164,13 +176,43 @@ struct ClipboardStoreSourceAttributionTests {
         tracker.recordActivatedSource(frontmostAfterSwitch, currentChangeCount: pasteboard.changeCount)
 
         store.pollPasteboard()
+        clock.advance(by: 1.0)
         store.pollPasteboard()
 
         #expect(store.items.first?.textValue == "copied text")
         #expect(store.items.first?.sourceApp == "App A")
     }
 
-    private func makeStore(orderedSources: OrderedFrontmostSources) -> (ClipboardStore, NSPasteboard) {
+    @Test func pendingObservationUptimeIsReplacedTogetherWithCountAndSource() {
+        let orderedSources = OrderedFrontmostSources([
+            source(named: "Source A"),
+            source(named: "Source B"),
+            source(named: "Confirmation C")
+        ])
+        let (store, pasteboard, clock) = makeStore(orderedSources: orderedSources)
+
+        pasteboard.clearContents()
+        pasteboard.setString("transient text", forType: .string)
+        store.pollPasteboard()
+
+        clock.advance(by: 0.05)
+        pasteboard.clearContents()
+        pasteboard.setString("final text", forType: .string)
+        store.pollPasteboard()
+
+        clock.advance(by: 0.05)
+        store.pollPasteboard()
+        #expect(store.items.isEmpty, "the replacement count must restart its own quiet time")
+
+        clock.advance(by: 1.0)
+        store.pollPasteboard()
+
+        #expect(store.items.first?.textValue == "final text")
+        #expect(store.items.first?.sourceApp == "Source B")
+    }
+
+    private func makeStore(orderedSources: OrderedFrontmostSources) -> (ClipboardStore, NSPasteboard, MutableClock) {
+        let clock = MutableClock()
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         let tracker = CopySourceTracker(frontmostSourceProvider: orderedSources.next)
@@ -179,9 +221,10 @@ struct ClipboardStoreSourceAttributionTests {
             sourceTracker: tracker,
             initialItems: [],
             pasteboard: pasteboard,
-            persistItems: { _ in }
+            persistItems: { _ in },
+            uptimeProvider: { clock.now }
         )
-        return (store, pasteboard)
+        return (store, pasteboard, clock)
     }
 
     private func source(named name: String) -> ClipboardSource {

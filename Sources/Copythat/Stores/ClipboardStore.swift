@@ -4,6 +4,12 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+private struct PendingObservation {
+    let changeCount: Int
+    let firstObservedSource: ClipboardSource?
+    let firstObservedUptime: TimeInterval
+}
+
 @MainActor
 final class ClipboardStore: ObservableObject {
     @Published private(set) var items: [ClipboardItem] = []
@@ -26,8 +32,15 @@ final class ClipboardStore: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var imageEncodingTask: Task<Void, Never>?
     private var lastChangeCount: Int
-    private var pendingChangeCount: Int?
-    private var pendingFirstObservedSource: ClipboardSource?
+    private var pendingObservation: PendingObservation?
+    private var isMonitoring = false
+    private var burstTask: Task<Void, Never>?
+    private var burstDeadline: TimeInterval?
+    private var burstGeneration = 0
+    private let uptimeProvider: () -> TimeInterval
+    private let minimumStabilityInterval: TimeInterval
+    private let burstPollInterval: TimeInterval
+    private let burstWindow: TimeInterval
     private var deletedContentKeys: [String] = []
     private let maxDeletedContentKeys = 256
 
@@ -37,13 +50,21 @@ final class ClipboardStore: ObservableObject {
         initialItems: [ClipboardItem]? = nil,
         pasteboard: NSPasteboard = .general,
         diagnostics: ClipboardDiagnostics = ClipboardDiagnostics(),
-        persistItems: @escaping ([ClipboardItem]) -> Void = ClipboardHistoryPersistence.save
+        persistItems: @escaping ([ClipboardItem]) -> Void = ClipboardHistoryPersistence.save,
+        uptimeProvider: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        minimumStabilityInterval: TimeInterval = 0.15,
+        burstPollInterval: TimeInterval = 0.06,
+        burstWindow: TimeInterval = 0.6
     ) {
         self.settings = settings
         self.sourceTracker = sourceTracker
         self.pasteboard = pasteboard
         self.diagnostics = diagnostics
         self.persistItems = persistItems
+        self.uptimeProvider = uptimeProvider
+        self.minimumStabilityInterval = minimumStabilityInterval
+        self.burstPollInterval = burstPollInterval
+        self.burstWindow = burstWindow
         lastChangeCount = pasteboard.changeCount
         items = initialItems ?? ClipboardHistoryPersistence.loadItems()
         refreshFilteredItems()
@@ -53,8 +74,19 @@ final class ClipboardStore: ObservableObject {
         filteredItems.first { $0.id == selectedID } ?? filteredItems.first
     }
 
+    // Test seam replacement: real single-task burst scheduling.
+    var isBurstPollingActive: Bool { burstTask != nil }
+    var burstDeadlineUptime: TimeInterval? { burstDeadline }
+
+    /// Copy-intent wake signal from `CopySourceTracker` (D2/D3): starts or extends
+    /// the bounded burst loop; rejected while monitoring is stopped.
+    func handleCopyIntentWake() {
+        extendBurst()
+    }
+
     func startMonitoring() {
-        timer?.invalidate()
+        guard !isMonitoring else { return }
+        isMonitoring = true
         timer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -68,47 +100,58 @@ final class ClipboardStore: ObservableObject {
     }
 
     func stopMonitoring() {
+        isMonitoring = false
         timer?.invalidate()
         timer = nil
         pollTask?.cancel()
         pollTask = nil
+        cancelBurstScheduling()
         imageEncodingTask?.cancel()
         imageEncodingTask = nil
     }
 
     func pollPasteboard() {
+        let now = uptimeProvider()
         let currentChangeCount = pasteboard.changeCount
         guard currentChangeCount != lastChangeCount else {
-            pendingChangeCount = nil
-            pendingFirstObservedSource = nil
+            pendingObservation = nil
             return
         }
 
-        guard pendingChangeCount == currentChangeCount else {
-            pendingChangeCount = currentChangeCount
-            pendingFirstObservedSource = sourceTracker.frontmostSourceSnapshot(
+        guard let pending = pendingObservation, pending.changeCount == currentChangeCount else {
+            let firstObservedSource = sourceTracker.frontmostSourceSnapshot(
                 pasteboardChangeCount: currentChangeCount
+            )
+            pendingObservation = PendingObservation(
+                changeCount: currentChangeCount,
+                firstObservedSource: firstObservedSource,
+                firstObservedUptime: now
             )
             diagnostics.logPasteboardObserved(
                 changeCount: currentChangeCount,
-                source: pendingFirstObservedSource
+                source: firstObservedSource,
+                uptime: now
             )
+            extendBurst()
             return
         }
 
+        guard now - pending.firstObservedUptime >= minimumStabilityInterval else { return }
+
+        pendingObservation = nil
         let changeCountDelta = max(1, currentChangeCount - lastChangeCount)
-        let firstObservedSource = pendingFirstObservedSource
-        pendingChangeCount = nil
-        pendingFirstObservedSource = nil
+        let firstObservedSource = pending.firstObservedSource
         guard let newItem = readCurrentPasteboard(
             changeCountDelta: changeCountDelta,
             currentChangeCount: currentChangeCount,
             firstObservedSource: firstObservedSource
         ) else {
             lastChangeCount = currentChangeCount
+            extendBurst()
             return
         }
         lastChangeCount = currentChangeCount
+        extendBurst()
         guard !ignoredApplications.contains(newItem.sourceApp) else { return }
         add(newItem)
     }
@@ -494,8 +537,69 @@ final class ClipboardStore: ObservableObject {
 
     private func markPasteboardProcessed() {
         lastChangeCount = pasteboard.changeCount
-        pendingChangeCount = nil
-        pendingFirstObservedSource = nil
+        pendingObservation = nil
+        cancelBurstScheduling()
+    }
+
+    // MARK: - Bounded burst polling
+
+    /// D5: start or extend the burst window only for meaningful activity
+    /// (copy intent, a newly observed external count, or a processed stable count).
+    /// Repeated signals never accumulate the deadline beyond one window from now (D3):
+    /// the loop stays bounded and cannot become a permanent fast poller.
+    private func extendBurst() {
+        guard isMonitoring else { return }
+        let now = uptimeProvider()
+        burstDeadline = max(burstDeadline ?? now, now + burstWindow)
+        startBurstLoopIfNeeded()
+    }
+
+    /// D3: at most one effective burst loop; repeated signals only extend its deadline.
+    private func startBurstLoopIfNeeded() {
+        guard burstTask == nil else { return }
+        burstGeneration += 1
+        let generation = burstGeneration
+        burstTask = Task { @MainActor [weak self] in
+            await self?.runBurstLoop(generation: generation)
+        }
+    }
+
+    /// Polls immediately, then at the private burst interval while the deadline is active.
+    /// Unstable ticks read only `pasteboard.changeCount`; the payload path runs once
+    /// after stability inside `pollPasteboard()`.
+    private func runBurstLoop(generation: Int) async {
+        while !Task.isCancelled {
+            guard burstGeneration == generation,
+                  isMonitoring,
+                  let deadline = burstDeadline else {
+                return
+            }
+            guard uptimeProvider() < deadline else { break }
+
+            pollPasteboard()
+
+            guard burstGeneration == generation, isMonitoring else { return }
+            do {
+                try await Task.sleep(nanoseconds: UInt64(burstPollInterval * 1_000_000_000))
+            } catch {
+                return
+            }
+        }
+        // Only the current generation may clear the active task reference (D3).
+        if burstGeneration == generation {
+            burstTask = nil
+            burstDeadline = nil
+        }
+    }
+
+    /// D7: self-writes and stop invalidate burst state, including the pending
+    /// observation, and bump the generation so stale tasks cannot clear newer state.
+    private func cancelBurstScheduling() {
+        burstGeneration += 1
+        burstTask?.cancel()
+        burstTask = nil
+        burstDeadline = nil
+        pendingObservation = nil
     }
 
     private func pasteboardMatches(_ item: ClipboardItem) -> Bool {
