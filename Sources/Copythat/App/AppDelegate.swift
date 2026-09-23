@@ -3,15 +3,46 @@ import Carbon
 import Combine
 import SwiftUI
 
+enum ClipboardHistoryQuitChoice {
+    case retry
+    case quitAnyway
+    case cancelQuit
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let model = AppModel()
+    let model: AppModel
     private var panelController: PanelWindowController?
     private lazy var settingsWindowController = SettingsWindowController(settings: model.settings, store: model.store)
     private var hotKeyManager: HotKeyManager?
     private var statusItem: NSStatusItem?
     private var statusMenuController: StatusMenuController?
     private var cancellables = Set<AnyCancellable>()
+    private let chooseQuitSaveFailure: () -> ClipboardHistoryQuitChoice
+    private let replyToTermination: (Bool) -> Void
+    private var isResolvingTermination = false
+    private var terminationTask: Task<Void, Never>?
+
+    override convenience init() {
+        self.init(
+            model: AppModel(),
+            chooseQuitSaveFailure: Self.showQuitSaveFailureAlert,
+            replyToTermination: { shouldTerminate in
+                NSApp.reply(toApplicationShouldTerminate: shouldTerminate)
+            }
+        )
+    }
+
+    init(
+        model: AppModel,
+        chooseQuitSaveFailure: @escaping () -> ClipboardHistoryQuitChoice,
+        replyToTermination: @escaping (Bool) -> Void
+    ) {
+        self.model = model
+        self.chooseQuitSaveFailure = chooseQuitSaveFailure
+        self.replyToTermination = replyToTermination
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         model.sourceTracker.start()
@@ -116,6 +147,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func quit() {
         NSApp.terminate(nil)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard model.historySaveCoordinator.hasUnsavedChanges else { return .terminateNow }
+        guard !isResolvingTermination else { return .terminateLater }
+
+        isResolvingTermination = true
+        terminationTask = Task { @MainActor [weak self] in
+            await self?.resolvePendingHistoryBeforeTermination()
+        }
+        return .terminateLater
+    }
+
+    private func resolvePendingHistoryBeforeTermination() async {
+        var didSave = await model.historySaveCoordinator.flush()
+        while !didSave {
+            switch chooseQuitSaveFailure() {
+            case .retry:
+                didSave = await model.historySaveCoordinator.retryLatest()
+            case .quitAnyway:
+                finishTerminationReply(shouldTerminate: true)
+                return
+            case .cancelQuit:
+                finishTerminationReply(shouldTerminate: false)
+                return
+            }
+        }
+        finishTerminationReply(shouldTerminate: true)
+    }
+
+    private func finishTerminationReply(shouldTerminate: Bool) {
+        isResolvingTermination = false
+        terminationTask = nil
+        replyToTermination(shouldTerminate)
+    }
+
+    private static func showQuitSaveFailureAlert() -> ClipboardHistoryQuitChoice {
+        let alert = NSAlert()
+        alert.messageText = "Clipboard history could not be saved"
+        alert.informativeText = "Retry saving, quit anyway and keep the previously saved history, or cancel quitting."
+        alert.addButton(withTitle: "Retry")
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.addButton(withTitle: "Cancel Quit")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .retry
+        case .alertSecondButtonReturn:
+            return .quitAnyway
+        default:
+            return .cancelQuit
+        }
     }
 }
 

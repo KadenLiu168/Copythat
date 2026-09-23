@@ -464,7 +464,7 @@ final class ClipboardStore: ObservableObject {
         }
     }
 
-    private func applyLinkPreview(itemID: UUID, title: String?, imageData: Data?) {
+    func applyLinkPreview(itemID: UUID, title: String?, imageData: Data?) {
         guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
         items[index] = items[index].withLinkPreview(title: title, linkImageData: imageData).storageOptimized
         refreshFilteredItems()

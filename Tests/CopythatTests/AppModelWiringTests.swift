@@ -2,9 +2,49 @@
 import Foundation
 import Testing
 
+private actor AppModelSaveRecorder: ClipboardHistorySaving {
+    private var snapshots: [[String?]] = []
+
+    func save(_ items: [ClipboardItem], generation: UInt64) async throws {
+        snapshots.append(items.map(\.textValue))
+    }
+
+    func collectGarbage() async {}
+
+    func recordedSnapshots() -> [[String?]] {
+        snapshots
+    }
+}
+
 @MainActor
 @Suite(.serialized)
 struct AppModelWiringTests {
+    @Test func storeMutationsReachTheInjectedHistorySaveCoordinator() async {
+        let worker = AppModelSaveRecorder()
+        let coordinator = ClipboardHistorySaveCoordinator(worker: worker)
+        let model = AppModel(historySaveCoordinator: coordinator)
+        let sentinel = "AppModel persistence wiring \(UUID().uuidString)"
+        let item = ClipboardItem(
+            id: UUID(),
+            kind: .text,
+            title: sentinel,
+            preview: sentinel,
+            sourceApp: "Tests",
+            sourceAppIconData: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_081),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: sentinel,
+            fileURLs: [],
+            imageData: nil
+        )
+
+        model.store.add(item)
+
+        #expect(await coordinator.flush())
+        #expect(await worker.recordedSnapshots().last?.contains(sentinel) == true)
+    }
+
     @Test func trackerWakeReachesStoreAndStartsOrExtendsTheStoreBurst() async {
         let model = AppModel()
         defer { model.store.stopMonitoring() }
