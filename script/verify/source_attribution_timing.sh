@@ -27,6 +27,19 @@ usage() {
     exit 2
 }
 
+activate_chrome_and_confirm_frontmost() {
+    osascript -e 'tell application id "com.google.Chrome" to activate'
+    local attempts
+    for ((attempts = 0; attempts < 20; attempts++)); do
+        if [[ "$(osascript -e 'tell application "System Events" to name of first process whose frontmost is true' 2>/dev/null)" == "Google Chrome" ]]; then
+            return 0
+        fi
+        sleep 0.05
+    done
+    echo "Chrome did not become the macOS frontmost application" >&2
+    return 1
+}
+
 analyze() {
     local mode="$1"
     local events_file="$2"
@@ -128,13 +141,24 @@ elif mode == "shortcut":
     for shortcut in (event for event in events if event.get("event") == "copy_shortcut_observed"):
         if shortcut.get("operation") != "copy" or shortcut.get("sourceApp") != "Google Chrome":
             continue
+        observed = next((
+            event for event in events
+            if event.get("event") == "pasteboard_observed"
+            and event.get("changeCount") is not None
+            and event.get("sourceApp") == "Google Chrome"
+            and event.get("changeCount", -1) > shortcut.get("changeCount", -1)
+            and event.get("uptime", 0) > shortcut.get("uptime", 0)
+        ), None)
+        if not observed:
+            continue
         resolved = next((
             event for event in events
             if event.get("event") == "source_resolved"
             and event.get("resolutionSlot") == "shortcut"
             and event.get("sourceApp") == "Google Chrome"
             and event.get("uptime", 0) > shortcut.get("uptime", 0)
-            and event.get("changeCount", -1) > shortcut.get("changeCount", -1)
+            and event.get("changeCount") == observed.get("changeCount")
+            and event.get("uptime", 0) >= observed.get("uptime", 0)
         ), None)
         if not resolved:
             continue
@@ -142,7 +166,7 @@ elif mode == "shortcut":
             event for event in events
             if event.get("event") == "app_activated"
             and event.get("sourceApp") == "Code"
-            and shortcut.get("uptime", 0) < event.get("uptime", 0) < resolved.get("uptime", 0)
+            and event.get("uptime", 0) > shortcut.get("uptime", 0)
             and event.get("changeCount") == resolved.get("changeCount")
         ), None)
         if not activated:
@@ -151,6 +175,7 @@ elif mode == "shortcut":
             "PASS source attribution timing"
             f" mode={mode} changeCount={resolved['changeCount']}"
             f" shortcutAt={shortcut['uptime']}"
+            f" observedAt={observed['uptime']}"
             f" activatedAt={activated['uptime']}"
             f" resolvedAt={resolved['uptime']}"
             " source=Google Chrome slot=shortcut"
@@ -270,16 +295,20 @@ live() {
     if [[ "$mode" == "non-keyboard" ]]; then
         local marker
         marker="copythat-acceptance-$(uuidgen)"
-        osascript -e 'tell application id "com.google.Chrome" to activate'
+        activate_chrome_and_confirm_frontmost
         sleep 0.3
         printf '%s' "$marker" | /usr/bin/pbcopy
         wait_for_pattern "$raw_log" 'pasteboard_observed' 100
         osascript -e 'tell application id "com.microsoft.VSCode" to activate'
         wait_for_pattern "$raw_log" 'source_resolved' 100
     elif [[ "$mode" == "shortcut" ]]; then
-        echo "Chrome will activate. Physically press Cmd+C, then switch to Visual Studio Code." >&2
-        sleep 2
-        osascript -e 'tell application id "com.google.Chrome" to activate'
+        activate_chrome_and_confirm_frontmost
+        echo "Chrome is frontmost. Physically press Cmd+C, then switch to Visual Studio Code." >&2
+        if [[ -t 0 ]]; then
+            read -r -p "Press Return after completing both actions: " _
+        else
+            sleep "${COPYTHAT_SHORTCUT_WAIT_SECONDS:-5}"
+        fi
         wait_for_pattern "$raw_log" 'copy_shortcut_observed' 1200
         wait_for_pattern "$raw_log" 'app_activated' 1200
         wait_for_pattern "$raw_log" 'source_resolved' 200

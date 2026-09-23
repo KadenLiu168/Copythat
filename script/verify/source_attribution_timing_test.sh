@@ -35,11 +35,29 @@ assert_fails() {
 
 assert_passes non-keyboard valid-non-keyboard.jsonl
 assert_passes shortcut valid-shortcut.jsonl
+assert_passes shortcut valid-shortcut-fast-resolution.jsonl
 assert_fails non-keyboard wrong-order.jsonl
 assert_fails non-keyboard wrong-source.jsonl
 assert_fails non-keyboard wrong-slot.jsonl
 assert_fails non-keyboard invalid-change-count-type.jsonl
 assert_fails non-keyboard unsafe-extra-field.jsonl
+
+(
+    source "$ANALYZER"
+    calls_file="$(mktemp -t copythat-source-activation-test)"
+    trap 'rm -f "$calls_file"' EXIT
+    osascript() {
+        printf '%s\n' "$*" >>"$calls_file"
+        if [[ "$*" == *"name of first process whose frontmost is true"* ]]; then
+            printf 'Google Chrome\n'
+        fi
+    }
+    activate_chrome_and_confirm_frontmost
+    first_call="$(sed -n '1p' "$calls_file")"
+    second_call="$(sed -n '2p' "$calls_file")"
+    [[ "$first_call" == *'tell application id "com.google.Chrome" to activate'* ]]
+    [[ "$second_call" == *"name of first process whose frontmost is true"* ]]
+)
 
 bash -c '
     source "$1"
