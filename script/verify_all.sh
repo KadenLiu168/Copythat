@@ -4,15 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+./script/verify/packaging_test.sh
+
 swift build
 SWIFT_PATH="$(xcrun --find swift 2>/dev/null || command -v swift)"
 SWIFT_ROOT="$(cd "$(dirname "$SWIFT_PATH")/../.." && pwd)"
 SWIFT_FRAMEWORKS="$SWIFT_ROOT/Library/Developer/Frameworks"
-SWIFT_TEST_FLAGS=()
 if [[ -d "$SWIFT_FRAMEWORKS/Testing.framework" ]]; then
-    SWIFT_TEST_FLAGS=(-Xswiftc -F -Xswiftc "$SWIFT_FRAMEWORKS")
+    swift test -Xswiftc -F -Xswiftc "$SWIFT_FRAMEWORKS"
+else
+    swift test
 fi
-swift test "${SWIFT_TEST_FLAGS[@]}"
 SOURCE_RESOLUTION_BIN="$(mktemp -t copythat_source_resolution)"
 swiftc Sources/Copythat/Support/CopySourceResolution.swift script/verify/source_resolution.swift -o "$SOURCE_RESOLUTION_BIN"
 "$SOURCE_RESOLUTION_BIN"
@@ -53,9 +55,20 @@ assert info["CFBundlePackageType"] == "APPL", info
 assert info["CFBundleName"] == "Copythat", info
 assert info["CFBundleExecutable"] == "Copythat", info
 assert info["CFBundleIdentifier"] == "local.copythat.clipboard", info
+assert info["CFBundleIconFile"] == "AppIcon", info
 assert info["LSUIElement"] is True, "Copythat should run as a menu bar resident app"
 assert "NSAppleEventsUsageDescription" in info, info
 assert "NSScreenCaptureUsageDescription" not in info, info
+resources = Path("dist/Copythat.app/Contents/Resources")
+assert (resources / "AppIcon.icns").is_file(), "missing outer AppIcon.icns"
+resource_bundle = resources / "Copythat_Copythat.bundle"
+resource_locations = (
+    resource_bundle / "MenuBarIconTemplate.png",
+    resource_bundle / "Contents/Resources/MenuBarIconTemplate.png",
+)
+assert any(path.is_file() for path in resource_locations), (
+    f"missing MenuBarIconTemplate.png in supported SwiftPM locations: {resource_locations}"
+)
 print("bundle ok", info["CFBundleIdentifier"], "LSUIElement", info["LSUIElement"])
 PY
 

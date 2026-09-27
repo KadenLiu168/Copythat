@@ -25,7 +25,8 @@ trap cleanup EXIT
 echo "Building release app bundle..."
 COPYTHAT_BUILD_CONFIGURATION=release "$ROOT_DIR/script/build_and_run.sh" --verify-portable
 
-if [ ! -f "$APP_RESOURCE_BUNDLE/MenuBarIconTemplate.png" ]; then
+if [ ! -f "$APP_RESOURCE_BUNDLE/MenuBarIconTemplate.png" ] &&
+   [ ! -f "$APP_RESOURCE_BUNDLE/Contents/Resources/MenuBarIconTemplate.png" ]; then
   echo "Missing packaged SwiftPM resources at $APP_RESOURCE_BUNDLE" >&2
   exit 1
 fi

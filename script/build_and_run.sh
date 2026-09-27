@@ -89,8 +89,9 @@ sign_app() {
 }
 
 verify_resource_bundle() {
-  if [ ! -f "$APP_RESOURCE_BUNDLE/MenuBarIconTemplate.png" ]; then
-    echo "Missing SwiftPM resource bundle at $APP_RESOURCE_BUNDLE" >&2
+  if [ ! -f "$APP_RESOURCE_BUNDLE/MenuBarIconTemplate.png" ] &&
+     [ ! -f "$APP_RESOURCE_BUNDLE/Contents/Resources/MenuBarIconTemplate.png" ]; then
+    echo "Missing SwiftPM resource bundle image at $APP_RESOURCE_BUNDLE or $APP_RESOURCE_BUNDLE/Contents/Resources" >&2
     exit 1
   fi
 }
@@ -155,9 +156,12 @@ mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 
-if [ -f "$ROOT_DIR/Sources/Copythat/Resources/AppIcon.icns" ]; then
-  cp "$ROOT_DIR/Sources/Copythat/Resources/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
+SOURCE_APP_ICON="$ROOT_DIR/Sources/Copythat/Resources/AppIcon.icns"
+if [ ! -f "$SOURCE_APP_ICON" ]; then
+  echo "Missing app icon source at $SOURCE_APP_ICON" >&2
+  exit 1
 fi
+cp "$SOURCE_APP_ICON" "$APP_RESOURCES/AppIcon.icns"
 
 if [ -d "$RESOURCE_BUNDLE" ]; then
   cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCE_BUNDLE"
@@ -192,6 +196,31 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+validate_app_icon() {
+  local icon_file
+
+  if ! plutil -lint "$INFO_PLIST" >/dev/null; then
+    echo "Invalid outer app Info.plist at $INFO_PLIST" >&2
+    exit 1
+  fi
+
+  if ! icon_file="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$INFO_PLIST" 2>/dev/null)"; then
+    echo "Missing CFBundleIconFile in $INFO_PLIST" >&2
+    exit 1
+  fi
+
+  if [ "$icon_file" != "AppIcon" ]; then
+    echo "CFBundleIconFile must be AppIcon in $INFO_PLIST" >&2
+    exit 1
+  fi
+
+  if [ ! -f "$APP_RESOURCES/${icon_file}.icns" ]; then
+    echo "Missing outer app icon resource at $APP_RESOURCES/${icon_file}.icns" >&2
+    exit 1
+  fi
+}
+
+validate_app_icon
 sign_app
 
 open_app() {
