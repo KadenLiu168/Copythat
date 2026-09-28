@@ -1,3 +1,4 @@
+// Link preview seam
 @testable import Copythat
 import AppKit
 import Foundation
@@ -128,6 +129,73 @@ private actor RapidMutationSaveWorker: ClipboardHistorySaving {
 @MainActor
 @Suite(.serialized)
 struct ClipboardStorePersistenceTests {
+    @Test func previewSavedToDiskRestoresIntoNewStoreAndRetainsURLBehavior() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PreviewRestore-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "PreviewRestore.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+        let persistence = ClipboardHistoryPersistence(directoryURL: directory, userDefaults: defaults)
+        let coordinator = ClipboardHistorySaveCoordinator(worker: ClipboardHistorySaveWorker(persistence: persistence))
+        let original = urlItemForPersistence(
+            id: "00000000-0000-0000-0000-000000000082",
+            title: "Original", preview: "https://restore.example.com/path?query=1"
+        )
+        let store = ClipboardStore(
+            settings: AppSettings(defaults: defaults), sourceTracker: CopySourceTracker(),
+            initialItems: [original], pasteboard: NSPasteboard.withUniqueName(),
+            persistItems: { coordinator.requestSave($0) }
+        )
+        let png = try #require(testImage().pngData(maxPixel: 32))
+        store.applyLinkPreview(itemID: original.id, title: "Searchable preview title", imageData: png)
+        store.togglePin(original)
+        store.move(original, toPinboard: "Work")
+        #expect(await coordinator.flush())
+        #expect(FileManager.default.fileExists(atPath: persistence.historyURL.path))
+        let reader = ClipboardHistoryPersistence(directoryURL: directory, userDefaults: defaults)
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        let requests = LinkPreviewCounter()
+        let restored = ClipboardStore(
+            settings: AppSettings(defaults: defaults), sourceTracker: CopySourceTracker(),
+            initialItems: try reader.loadItems(), pasteboard: pasteboard, persistItems: { _ in },
+            fetchLinkMetadata: { _ in
+                requests.mark("metadata")
+                throw URLError(.unsupportedURL)
+            }
+        )
+        let item = try #require(restored.items.first)
+        #expect(item.id == original.id)
+        #expect(item.kind == .url)
+        #expect(item.textValue == original.textValue)
+        #expect(item.sourceApp == original.sourceApp)
+        #expect(item.linkTitle == "Searchable preview title")
+        #expect(item.linkImageData == png)
+        #expect(NSImage(data: try #require(item.linkImageData))?.size == NSSize(width: 32, height: 32))
+        #expect(item.isPinned)
+        #expect(item.pinboardName == "Work")
+        restored.searchText = "Searchable preview"
+        #expect(restored.filteredItems.map(\.id) == [original.id])
+        restored.selectedBoardID = Pinboard.pinned.id
+        #expect(restored.filteredItems.map(\.id) == [original.id])
+        restored.selectedBoardID = Pinboard.custom("Work").id
+        #expect(restored.filteredItems.map(\.id) == [original.id])
+        restored.panelDidOpen()
+        #expect(restored.metadataTasks.isEmpty)
+        #expect(restored.activeFallback == nil)
+        #expect(requests.value("metadata") == 0)
+        #expect(restored.writeToPasteboard(item))
+        #expect(pasteboard.string(forType: .string) == original.textValue)
+        restored.remove(item)
+        #expect(restored.items.isEmpty)
+        #expect(restored.filteredItems.isEmpty)
+        #expect(restored.selectedID == nil)
+        restored.panelDidClose()
+    }
+
     @Test func rapidMutationsAndPreviewArrivalCommitOnlyLatestSnapshot() async throws {
         let defaultsName = "ClipboardStorePersistenceTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsName)!
@@ -273,6 +341,96 @@ struct ClipboardStorePersistenceTests {
         #expect(await worker.recordedSaves().last?.items.isEmpty == true)
     }
 
+    private func urlItemForPersistence(
+        id: String,
+        title: String,
+        preview: String
+    ) -> ClipboardItem {
+        ClipboardItem(
+            id: UUID(uuidString: id)!,
+            kind: .url,
+            title: title,
+            preview: preview,
+            sourceApp: "Safari",
+            sourceAppIconData: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_080),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: preview,
+            fileURLs: [],
+            imageData: nil
+        )
+    }
+
+    private func makeOrchestrationPersistenceStack() -> (
+        ClipboardStore,
+        StorePersistenceRecorder,
+        ClipboardHistorySaveCoordinator,
+        LinkPreviewCounter,
+        LinkPreviewGate,
+        ClipboardItem,
+        ClipboardItem
+    ) {
+        let defaultsName = "ClipboardStorePersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        let worker = StorePersistenceRecorder()
+        let coordinator = ClipboardHistorySaveCoordinator(worker: worker)
+        let counter = LinkPreviewCounter()
+        let gate = LinkPreviewGate()
+        let url = "https://orchestrated.example.com/"
+        let urlItem = urlItemForPersistence(id: "00000000-0000-0000-0000-000000000080", title: "Orchestrated", preview: url)
+        let removedItem = urlItemForPersistence(id: "00000000-0000-0000-0000-000000000081", title: "Removed", preview: "https://removed.example.com/")
+        let store = ClipboardStore(
+            settings: AppSettings(defaults: defaults),
+            sourceTracker: CopySourceTracker(),
+            initialItems: [],
+            pasteboard: NSPasteboard.withUniqueName(),
+            persistItems: { coordinator.requestSave($0) },
+            fetchLinkMetadata: { requestURL in
+                counter.begin("metadata:\(requestURL.absoluteString)")
+                defer { counter.end("metadata:\(requestURL.absoluteString)") }
+                if requestURL.absoluteString == url {
+                    // Empty metadata success: eligible, no data change, no save.
+                    return LinkPreviewMetadata(title: nil, imageData: nil)
+                }
+                return try await LinkPreviewMetadataScript
+                    .lateAfterCancel(gate, then: .titleOnly("Late"))
+                    .evaluate(counter: counter, key: "removed")
+            },
+            fetchLinkSnapshot: { _ in throw URLError(.badServerResponse) }
+        )
+        store.linkPreviewHandledObserver = { counter.mark("handled") }
+        return (store, worker, coordinator, counter, gate, urlItem, removedItem)
+    }
+
+    @Test func orchestratedPreviewCompletionDoesNotAddExtraSaves() async throws {
+        let (store, worker, coordinator, counter, gate, urlItem, removedItem) =
+            makeOrchestrationPersistenceStack()
+
+        store.add(urlItem)
+        store.add(removedItem)
+        store.remove(removedItem)
+        await counter.waitFor("metadata:https://removed.example.com/", reaching: 1)
+        gate.release()
+        await counter.waitFor("handled", reaching: 1)
+        #expect(await coordinator.flush())
+
+        let savesAfterLateCompletions = await worker.recordedSaves().count
+        // Empty metadata and the removed item's late completion created no save.
+        let previewImage = try #require(testImage().pngData(maxPixel: 32))
+        store.applyLinkPreview(itemID: urlItem.id, title: "Valid preview", imageData: previewImage)
+        #expect(await coordinator.flush())
+        let saves = await worker.recordedSaves()
+        let latest = try #require(saves.last)
+
+        #expect(saves.count >= savesAfterLateCompletions + 1)
+        #expect(latest.items.first(where: { $0.id == urlItem.id })?.linkTitle == "Valid preview")
+        #expect(latest.items.first(where: { $0.id == urlItem.id })?.linkImageData != nil)
+        #expect(saves.allSatisfy { snapshot in
+            snapshot.items.first { $0.id == removedItem.id }?.linkTitle == nil
+        })
+    }
+
     private func textItem(_ id: String, text: String) -> ClipboardItem {
         ClipboardItem(
             id: UUID(uuidString: id)!,
@@ -304,9 +462,9 @@ struct ClipboardStorePersistenceTests {
             bitsPerPixel: 0
         )!
         let color = NSColor(calibratedRed: 0.2, green: 0.4, blue: 0.8, alpha: 1)
-        for x in 0..<32 {
-            for y in 0..<32 {
-                bitmap.setColor(color, atX: x, y: y)
+        for pixelX in 0..<32 {
+            for pixelY in 0..<32 {
+                bitmap.setColor(color, atX: pixelX, y: pixelY)
             }
         }
         let image = NSImage(size: NSSize(width: 32, height: 32))

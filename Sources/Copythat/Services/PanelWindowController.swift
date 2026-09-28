@@ -38,9 +38,13 @@ final class PanelWindowController {
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.orderFrontRegardless()
+        model.store.panelDidOpen()
     }
 
     func close() {
+        // Revoke fallback eligibility and cancel active fallback work before the
+        // window is ordered out; NSHostingView stays alive either way.
+        model.store.panelDidClose()
         panel?.orderOut(nil)
     }
 
@@ -102,16 +106,16 @@ final class PanelWindowController {
             guard (window[kCGWindowOwnerPID as String] as? pid_t) == targetApp.processIdentifier,
                   (window[kCGWindowLayer as String] as? Int) == 0,
                   let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
-                  let x = bounds["X"],
-                  let y = bounds["Y"],
+                  let originX = bounds["X"],
+                  let originY = bounds["Y"],
                   let width = bounds["Width"],
                   let height = bounds["Height"] else {
                 return false
             }
 
             let frame = CGRect(
-                x: x,
-                y: screen.frame.maxY - y - height,
+                x: originX,
+                y: screen.frame.maxY - originY - height,
                 width: width,
                 height: height
             )

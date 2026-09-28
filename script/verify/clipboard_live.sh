@@ -262,10 +262,13 @@ build_driver() {
         Sources/Copythat/Support/ClipboardHistoryPolicy.swift
         Sources/Copythat/Support/CopySourceResolution.swift
         Sources/Copythat/Support/LinkPreviewFetcher.swift
+        Sources/Copythat/Support/LinkPreviewSnapshotController.swift
         Sources/Copythat/Support/NSImage+PasteData.swift
         Sources/Copythat/Support/String+Truncate.swift
         Sources/Copythat/Stores/AppSettings.swift
         Sources/Copythat/Stores/ClipboardStore.swift
+        Sources/Copythat/Stores/ClipboardStore+LinkPreview.swift
+        Sources/Copythat/Stores/Pinboard.swift
         Sources/Copythat/Services/CopySourceTracker.swift
         "$DRIVER_SOURCE"
     )

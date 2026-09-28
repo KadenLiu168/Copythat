@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -9,11 +10,49 @@ final class AppModel: ObservableObject {
     let historySaveCoordinator: ClipboardHistorySaveCoordinator
 
     convenience init() {
-        self.init(historySaveCoordinator: ClipboardHistorySaveCoordinator())
+        #if DEBUG
+        if let root = ProcessInfo.processInfo.environment["COPYTHAT_VERIFY_ROOT"] {
+            guard root.hasPrefix("/"),
+                  let suite = ProcessInfo.processInfo.environment["COPYTHAT_VERIFY_DEFAULTS_SUITE"],
+                  suite.hasPrefix("local.copythat.verify."),
+                  let defaults = UserDefaults(suiteName: suite),
+                  let name = ProcessInfo.processInfo.environment["COPYTHAT_TEST_PASTEBOARD_NAME"] else {
+                fatalError("Incomplete verification isolation configuration")
+            }
+            // Seed every setting read by AppSettings in the verification suite,
+            // avoiding inherited application-domain values in UserDefaults' search list.
+            defaults.setPersistentDomain([
+                "historyLimit": 500, "recordSensitiveContent": false,
+                "ignoredApplications": "", "customPinboards": Data("[]".utf8),
+                "pinboardsText": "", "shortcut": AppSettings.GlobalShortcut.commandShiftV.rawValue,
+                "appearance": AppSettings.AppearanceMode.system.rawValue,
+            ], forName: suite)
+            let persistence = ClipboardHistoryPersistence(
+                directoryURL: URL(fileURLWithPath: root, isDirectory: true), userDefaults: defaults
+            )
+            self.init(
+                historySaveCoordinator: ClipboardHistorySaveCoordinator(
+                    worker: ClipboardHistorySaveWorker(persistence: persistence)
+                ),
+                pasteboard: NSPasteboard(name: NSPasteboard.Name(name)),
+                settings: AppSettings(defaults: defaults), initialItems: []
+            )
+            return
+        }
+        #endif
+        self.init(
+            historySaveCoordinator: ClipboardHistorySaveCoordinator(),
+            pasteboard: Self.capturePasteboard
+        )
     }
 
-    init(historySaveCoordinator: ClipboardHistorySaveCoordinator) {
-        let settings = AppSettings()
+    init(
+        historySaveCoordinator: ClipboardHistorySaveCoordinator,
+        pasteboard: NSPasteboard = .general,
+        settings: AppSettings? = nil,
+        initialItems: [ClipboardItem]? = nil
+    ) {
+        let settings = settings ?? AppSettings()
         let sourceTracker = CopySourceTracker()
         self.settings = settings
         self.sourceTracker = sourceTracker
@@ -21,6 +60,8 @@ final class AppModel: ObservableObject {
         let store = ClipboardStore(
             settings: settings,
             sourceTracker: sourceTracker,
+            initialItems: initialItems,
+            pasteboard: pasteboard,
             persistItems: { historySaveCoordinator.requestSave($0) }
         )
         self.store = store
@@ -31,5 +72,14 @@ final class AppModel: ObservableObject {
                 store?.handleCopyIntentWake()
             }
         }
+    }
+
+    private static var capturePasteboard: NSPasteboard {
+        #if DEBUG
+        if let name = ProcessInfo.processInfo.environment["COPYTHAT_TEST_PASTEBOARD_NAME"] {
+            return NSPasteboard(name: NSPasteboard.Name(name))
+        }
+        #endif
+        return .general
     }
 }

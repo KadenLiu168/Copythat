@@ -52,9 +52,9 @@ struct ClipboardStoreImageDeletionTests {
     }
 
     @Test func deletingCurrentImageClearsPasteboardAndCancelsPendingEncoding() async throws {
-        let pasteboard = NSPasteboard.general
+        let pasteboard = NSPasteboard.withUniqueName()
         let image = solidImage(color: .systemRed)
-        let store = store(items: [])
+        let store = store(items: [], pasteboard: pasteboard)
         let imageData = try #require(store.normalizedImageData(for: image))
         let captured = imageItem(data: imageData)
         store.add(captured)
@@ -69,22 +69,23 @@ struct ClipboardStoreImageDeletionTests {
     }
 
     @Test func deletingOlderItemDoesNotClearCurrentPasteboard() {
-        let pasteboard = NSPasteboard.general
+        let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         pasteboard.setString("current text", forType: .string)
         let old = textItem("old text")
-        let store = store(items: [old])
+        let store = store(items: [old], pasteboard: pasteboard)
 
         store.remove(old)
 
         #expect(pasteboard.string(forType: .string) == "current text")
     }
 
-    private func store(items: [ClipboardItem]) -> ClipboardStore {
+    private func store(items: [ClipboardItem], pasteboard: NSPasteboard = .withUniqueName()) -> ClipboardStore {
         ClipboardStore(
             settings: AppSettings(defaults: temporaryDefaults()),
             sourceTracker: CopySourceTracker(),
             initialItems: items,
+            pasteboard: pasteboard,
             persistItems: { _ in }
         )
     }

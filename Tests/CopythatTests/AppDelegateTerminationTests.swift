@@ -66,7 +66,7 @@ struct AppDelegateTerminationTests {
     @Test func pendingLatestSaveCompletesNormalTermination() async {
         let worker = TerminationSaveWorker(blockedGenerations: [1])
         let coordinator = ClipboardHistorySaveCoordinator(worker: worker)
-        let model = AppModel(historySaveCoordinator: coordinator)
+        let model = isolatedAppModel(coordinator: coordinator)
         coordinator.requestSave([historyItem("latest")])
         await worker.waitUntilStarted(1)
 
@@ -88,7 +88,7 @@ struct AppDelegateTerminationTests {
     @Test func retrySavesTheLatestStateBeforeReplyingToQuit() async {
         let worker = TerminationSaveWorker(committedText: "previously committed", failedGenerations: [2])
         let coordinator = ClipboardHistorySaveCoordinator(worker: worker)
-        let model = AppModel(historySaveCoordinator: coordinator)
+        let model = isolatedAppModel(coordinator: coordinator)
         coordinator.requestSave([historyItem("first")])
         #expect(await coordinator.flush())
         coordinator.requestSave([historyItem("latest")])
@@ -114,7 +114,7 @@ struct AppDelegateTerminationTests {
     @Test func quitAnywayKeepsPreviouslyCommittedHistory() async {
         let worker = TerminationSaveWorker(committedText: "previously committed", failedGenerations: [2])
         let coordinator = ClipboardHistorySaveCoordinator(worker: worker)
-        let model = AppModel(historySaveCoordinator: coordinator)
+        let model = isolatedAppModel(coordinator: coordinator)
         coordinator.requestSave([historyItem("committed")])
         #expect(await coordinator.flush())
         coordinator.requestSave([historyItem("unsaved")])
@@ -137,7 +137,7 @@ struct AppDelegateTerminationTests {
     @Test func cancelQuitRepliesFalseAndAllowsAnotherQuitAttempt() async {
         let worker = TerminationSaveWorker(committedText: "previously committed", failedGenerations: [2])
         let coordinator = ClipboardHistorySaveCoordinator(worker: worker)
-        let model = AppModel(historySaveCoordinator: coordinator)
+        let model = isolatedAppModel(coordinator: coordinator)
         coordinator.requestSave([historyItem("committed")])
         #expect(await coordinator.flush())
         coordinator.requestSave([historyItem("unsaved")])
@@ -166,7 +166,7 @@ struct AppDelegateTerminationTests {
     @Test func terminationWaitsForAnewerGenerationInsteadOfAcceptingAnOlderSave() async {
         let worker = TerminationSaveWorker(blockedGenerations: [1, 2])
         let coordinator = ClipboardHistorySaveCoordinator(worker: worker)
-        let model = AppModel(historySaveCoordinator: coordinator)
+        let model = isolatedAppModel(coordinator: coordinator)
         coordinator.requestSave([historyItem("older")])
         await worker.waitUntilStarted(1)
 

@@ -22,7 +22,7 @@ struct AppModelWiringTests {
     @Test func storeMutationsReachTheInjectedHistorySaveCoordinator() async {
         let worker = AppModelSaveRecorder()
         let coordinator = ClipboardHistorySaveCoordinator(worker: worker)
-        let model = AppModel(historySaveCoordinator: coordinator)
+        let model = isolatedAppModel(coordinator: coordinator)
         let sentinel = "AppModel persistence wiring \(UUID().uuidString)"
         let item = ClipboardItem(
             id: UUID(),
@@ -46,7 +46,7 @@ struct AppModelWiringTests {
     }
 
     @Test func trackerWakeReachesStoreAndStartsOrExtendsTheStoreBurst() async {
-        let model = AppModel()
+        let model = isolatedAppModel()
         defer { model.store.stopMonitoring() }
         model.store.startMonitoring()
 
@@ -63,7 +63,7 @@ struct AppModelWiringTests {
     }
 
     @Test func storeDeallocatesAfterModelIsReleased() {
-        var model: AppModel? = AppModel()
+        var model: AppModel? = isolatedAppModel()
         weak var weakStore = model?.store
         weak var weakTracker = model?.sourceTracker
         #expect(weakStore != nil)

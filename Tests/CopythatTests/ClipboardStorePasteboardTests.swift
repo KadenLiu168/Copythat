@@ -169,7 +169,11 @@ struct ClipboardStorePasteboardTests {
             initialItems: [],
             pasteboard: pasteboard,
             persistItems: { _ in },
-            uptimeProvider: { clock.now }
+            uptimeProvider: { clock.now },
+            // Unit tests must not touch the real network: captured URLs here
+            // would otherwise trigger the eager metadata stage.
+            fetchLinkMetadata: { _ in throw URLError(.unsupportedURL) },
+            fetchLinkSnapshot: { _ in throw URLError(.unsupportedURL) }
         )
         return (store, pasteboard, clock)
     }

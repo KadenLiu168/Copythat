@@ -18,11 +18,12 @@ struct StatusMenuControllerTests {
     }
 
     @Test func settingsWindowControllerCreatesSettingsWindow() {
-        let settings = AppSettings()
+        let settings = isolatedAppSettings()
         let store = ClipboardStore(
             settings: settings,
             sourceTracker: CopySourceTracker(),
             initialItems: [],
+            pasteboard: NSPasteboard.withUniqueName(),
             persistItems: { _ in }
         )
         let controller = SettingsWindowController(settings: settings, store: store)

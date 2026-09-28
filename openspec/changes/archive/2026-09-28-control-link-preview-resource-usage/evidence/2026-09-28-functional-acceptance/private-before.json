@@ -1,0 +1,465 @@
+{
+  "files": [
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/clipboard-history.json",
+      "sha256": "6094aade8cb69cbfe55618ebda2d06e7f6992d383aa0b1840a4958a68a870677",
+      "size": 829889
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/04984d436b00c452d49f18c7539192d0875f5b88fdcb8eb078ddf5e3552aa60a.blob",
+      "sha256": "04984d436b00c452d49f18c7539192d0875f5b88fdcb8eb078ddf5e3552aa60a",
+      "size": 21716
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/12cd1a98f5a031b0fe8009fb135683b1311fbd7c540a0f3a69e8154fe8d18937.blob",
+      "sha256": "12cd1a98f5a031b0fe8009fb135683b1311fbd7c540a0f3a69e8154fe8d18937",
+      "size": 65977
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/14f1bcd86b461e838d4a4cb65901d1048e12d6dcf09076679cb18e4521779709.blob",
+      "sha256": "14f1bcd86b461e838d4a4cb65901d1048e12d6dcf09076679cb18e4521779709",
+      "size": 48914
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/15caedfc6110e305b37703ff273441686fb27f1b30f92dd99a77b296d69e2e89.blob",
+      "sha256": "15caedfc6110e305b37703ff273441686fb27f1b30f92dd99a77b296d69e2e89",
+      "size": 36678
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/1680e811bd4cd8cce5f706c95fbd080d51a4942ab3d9b5a321358275fd7e261d.blob",
+      "sha256": "1680e811bd4cd8cce5f706c95fbd080d51a4942ab3d9b5a321358275fd7e261d",
+      "size": 288775
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/189d76e50c26c0c796e0bfdcccff258325388a05f0f650006fdbf4b3545a23b7.blob",
+      "sha256": "189d76e50c26c0c796e0bfdcccff258325388a05f0f650006fdbf4b3545a23b7",
+      "size": 10736
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/19e20faf7aa2345e18e2940542387272cc8f81302adf59a8d70e2db2d9fa6ae4.blob",
+      "sha256": "19e20faf7aa2345e18e2940542387272cc8f81302adf59a8d70e2db2d9fa6ae4",
+      "size": 3418
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/208635e6c34f78a6168f5020a55df20421ca283675c3020fd24af5e74582bebf.blob",
+      "sha256": "208635e6c34f78a6168f5020a55df20421ca283675c3020fd24af5e74582bebf",
+      "size": 29371
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/2104687986b3f3012348884c0e568337c7647927b57cb73408fa1139e9b9caf7.blob",
+      "sha256": "2104687986b3f3012348884c0e568337c7647927b57cb73408fa1139e9b9caf7",
+      "size": 692975
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/2153145bbb2f8cb73eeb43e81b619806e2949a5c82bf113e83d231bb29139e15.blob",
+      "sha256": "2153145bbb2f8cb73eeb43e81b619806e2949a5c82bf113e83d231bb29139e15",
+      "size": 10986
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/28b2a13d62063cfcbb67b26b38c7034d50e37084213f9ec321085489136873ae.blob",
+      "sha256": "28b2a13d62063cfcbb67b26b38c7034d50e37084213f9ec321085489136873ae",
+      "size": 52722
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/2c0fb6ec4c3f0545aa1c09a0e0d9f497a0a1e01e8c0401d59b99ce89403f3bb3.blob",
+      "sha256": "2c0fb6ec4c3f0545aa1c09a0e0d9f497a0a1e01e8c0401d59b99ce89403f3bb3",
+      "size": 96458
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/2d8a74127a50ac50700dad683753c81dfcc289b72a18dc8dafa6268e6b2341dc.blob",
+      "sha256": "2d8a74127a50ac50700dad683753c81dfcc289b72a18dc8dafa6268e6b2341dc",
+      "size": 11689
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/2dda443e0f4236529a71ae4c05434395af8f803c6f2b98c7e8283161a5dad8d0.blob",
+      "sha256": "2dda443e0f4236529a71ae4c05434395af8f803c6f2b98c7e8283161a5dad8d0",
+      "size": 23930
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/33a793902d285688e3327b7eb0fe8fc830f9d9a7a97ad63433043ac79ee969f9.blob",
+      "sha256": "33a793902d285688e3327b7eb0fe8fc830f9d9a7a97ad63433043ac79ee969f9",
+      "size": 837160
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/352f504457daa4f18c69d72188da603243d51c8d4357e55807c19f4ac8b3b3de.blob",
+      "sha256": "352f504457daa4f18c69d72188da603243d51c8d4357e55807c19f4ac8b3b3de",
+      "size": 13007
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/3592c9409d716cbe9218ffbe5945ed4dbe3cf9fbfb510f47d02c0ad6d590a546.blob",
+      "sha256": "3592c9409d716cbe9218ffbe5945ed4dbe3cf9fbfb510f47d02c0ad6d590a546",
+      "size": 156166
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/39212268fb7472a9c2c73ed7c35ffbb4ca38689b4a544a42e8ecda9c7ce76049.blob",
+      "sha256": "39212268fb7472a9c2c73ed7c35ffbb4ca38689b4a544a42e8ecda9c7ce76049",
+      "size": 147504
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/3c9fafac9828c9d9128daa667254c018cca73b91ebb770797a848107920ba010.blob",
+      "sha256": "3c9fafac9828c9d9128daa667254c018cca73b91ebb770797a848107920ba010",
+      "size": 110954
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/426c1e14695d4432ed586ea45d94ebb9477c2490a215cafc0ffb63e7d489c431.blob",
+      "sha256": "426c1e14695d4432ed586ea45d94ebb9477c2490a215cafc0ffb63e7d489c431",
+      "size": 48163
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/42c07a311acfdb50bbab391b65d69e9c2ecfd8ac1d27105e560aa183de31fbed.blob",
+      "sha256": "42c07a311acfdb50bbab391b65d69e9c2ecfd8ac1d27105e560aa183de31fbed",
+      "size": 281239
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/43b6bd03174dd622dd8362c337449c6fc70760b02fae69b3ad7e6b0a194754c2.blob",
+      "sha256": "43b6bd03174dd622dd8362c337449c6fc70760b02fae69b3ad7e6b0a194754c2",
+      "size": 264032
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/4c699dc7376d31a1668104d808345cf6452bf8bff8aeae71eabe844dca0b23eb.blob",
+      "sha256": "4c699dc7376d31a1668104d808345cf6452bf8bff8aeae71eabe844dca0b23eb",
+      "size": 29271
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/4ce57f350140195bddfcf5e573f427d991ffccb022ab837b0c984e233980cb6c.blob",
+      "sha256": "4ce57f350140195bddfcf5e573f427d991ffccb022ab837b0c984e233980cb6c",
+      "size": 70242
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/547c759a3233296eebc2230ab379afea77fe443f59ab0ccfa32c1b52146af6f6.blob",
+      "sha256": "547c759a3233296eebc2230ab379afea77fe443f59ab0ccfa32c1b52146af6f6",
+      "size": 29622
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/55282b783c474dc2309506305ee4791421953f4e0ee59088a5f260b9be506f0e.blob",
+      "sha256": "55282b783c474dc2309506305ee4791421953f4e0ee59088a5f260b9be506f0e",
+      "size": 171003
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/56250f1588bb5e5fe2977f682801ddee259a93ab8d86011028a2cf62ac0913b8.blob",
+      "sha256": "56250f1588bb5e5fe2977f682801ddee259a93ab8d86011028a2cf62ac0913b8",
+      "size": 31911
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/5f11cbd1d448753d827a43dbd1b8012ad9382af73c094e27e369041ff22dcbe7.blob",
+      "sha256": "5f11cbd1d448753d827a43dbd1b8012ad9382af73c094e27e369041ff22dcbe7",
+      "size": 15330
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/610113e56a81689eacde95739465fa0de1a587c0e560fc391d6f964457a3659c.blob",
+      "sha256": "610113e56a81689eacde95739465fa0de1a587c0e560fc391d6f964457a3659c",
+      "size": 16644
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/616d0654de8f47255cb00bb717a0d5f8893131ddc6e2fc6fdb0e39e4b548df82.blob",
+      "sha256": "616d0654de8f47255cb00bb717a0d5f8893131ddc6e2fc6fdb0e39e4b548df82",
+      "size": 12061
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/63f26246586b5918e877af158983ef43f6af28d1194644a3dc60745a0ac41924.blob",
+      "sha256": "63f26246586b5918e877af158983ef43f6af28d1194644a3dc60745a0ac41924",
+      "size": 271154
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/6583c36ea29fbe94f75413a23dfa1eead260e518d0ab95ec2e7d5bf33f736130.blob",
+      "sha256": "6583c36ea29fbe94f75413a23dfa1eead260e518d0ab95ec2e7d5bf33f736130",
+      "size": 29188
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/6770f8f459584306497b40efd53e3e7673d557d140e9d7b23889fa985e08ffad.blob",
+      "sha256": "6770f8f459584306497b40efd53e3e7673d557d140e9d7b23889fa985e08ffad",
+      "size": 10706
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/67bd56cc896859a6d9457fb34afd1cce7f4196aaf64094f73d27a1d4ac99b8f7.blob",
+      "sha256": "67bd56cc896859a6d9457fb34afd1cce7f4196aaf64094f73d27a1d4ac99b8f7",
+      "size": 120379
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/6f117c17fbf8567d756487d7f5005d8aacdee1053ede579415e655bd38edbb75.blob",
+      "sha256": "6f117c17fbf8567d756487d7f5005d8aacdee1053ede579415e655bd38edbb75",
+      "size": 29980
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/70417ac667b2d49c6637755a19e6cf52e9b0ecee42b99c1ebc91370cd2c58229.blob",
+      "sha256": "70417ac667b2d49c6637755a19e6cf52e9b0ecee42b99c1ebc91370cd2c58229",
+      "size": 1059998
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/73a410e9901639b872b8e773bbe43e6a26a9e6879f93ffaf2d36fc62fd92079d.blob",
+      "sha256": "73a410e9901639b872b8e773bbe43e6a26a9e6879f93ffaf2d36fc62fd92079d",
+      "size": 83023
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/766c8ee1b30ea351ad757e1f884cff172a9c1e51ac31899ab1503a5433c14462.blob",
+      "sha256": "766c8ee1b30ea351ad757e1f884cff172a9c1e51ac31899ab1503a5433c14462",
+      "size": 15962
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/76854b731b93dcbae269d563968f4e7d40e7ad7367e91482d37abd489c4dc578.blob",
+      "sha256": "76854b731b93dcbae269d563968f4e7d40e7ad7367e91482d37abd489c4dc578",
+      "size": 16288
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/7b36d288d406b4dba42de1340995bff28d50d3ecbac70a11e07b52adf737e099.blob",
+      "sha256": "7b36d288d406b4dba42de1340995bff28d50d3ecbac70a11e07b52adf737e099",
+      "size": 276218
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/7bf15ff80d001378d11fd67b9c28db7c43b25dfe68e27c7e6ecc797d14dd70e3.blob",
+      "sha256": "7bf15ff80d001378d11fd67b9c28db7c43b25dfe68e27c7e6ecc797d14dd70e3",
+      "size": 170791
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/7fb28f77f1a74b595cdd5e2df53f46775d5e9c8ae38e07ea24b665e6e46a1616.blob",
+      "sha256": "7fb28f77f1a74b595cdd5e2df53f46775d5e9c8ae38e07ea24b665e6e46a1616",
+      "size": 20923
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/81ddf94e5bc79f8413d73d9a810192b541eb2c8f4885459bd07859eef47001e2.blob",
+      "sha256": "81ddf94e5bc79f8413d73d9a810192b541eb2c8f4885459bd07859eef47001e2",
+      "size": 1233
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/84dd1affea2dbc21a8a3c431c0170b085bc90307700bfb23d6ebd3c7ef1be08a.blob",
+      "sha256": "84dd1affea2dbc21a8a3c431c0170b085bc90307700bfb23d6ebd3c7ef1be08a",
+      "size": 68917
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/857cc7642c76b4b710bfdd84c2acb429a4e7ad2ef19e6b947f859fece1913d2e.blob",
+      "sha256": "857cc7642c76b4b710bfdd84c2acb429a4e7ad2ef19e6b947f859fece1913d2e",
+      "size": 66982
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/8b33efc5f29debc8a208d1e1924cf8228c09d7ba44005296cc86a4e917ce97fb.blob",
+      "sha256": "8b33efc5f29debc8a208d1e1924cf8228c09d7ba44005296cc86a4e917ce97fb",
+      "size": 13293
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/8b41d7ee6fa0383abe65c537901f917d19400605dd2ffb7c215794671859f456.blob",
+      "sha256": "8b41d7ee6fa0383abe65c537901f917d19400605dd2ffb7c215794671859f456",
+      "size": 657982
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/8c527a4a8bf90cf5c98864591c859804f0987a7c18d20bcbbe9fdca000f73b08.blob",
+      "sha256": "8c527a4a8bf90cf5c98864591c859804f0987a7c18d20bcbbe9fdca000f73b08",
+      "size": 178649
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/8ee1c7bb91a99be4df9198d496067da683a3bf4f88d26b4eaf81b3da37ee9524.blob",
+      "sha256": "8ee1c7bb91a99be4df9198d496067da683a3bf4f88d26b4eaf81b3da37ee9524",
+      "size": 30036
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/8f06b2a2a339efb4db378d574e0d2d517a0dd55bd2c6600b4da634163fdf2648.blob",
+      "sha256": "8f06b2a2a339efb4db378d574e0d2d517a0dd55bd2c6600b4da634163fdf2648",
+      "size": 29114
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/9284f45744aaebf1db713cbcec49b182b870d85c5f89f74e01178c2e3266e144.blob",
+      "sha256": "9284f45744aaebf1db713cbcec49b182b870d85c5f89f74e01178c2e3266e144",
+      "size": 80411
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/93d9ef74040be5f820496d77e553d36fa0dba2aeb799ebb708cd23febe1e72b4.blob",
+      "sha256": "93d9ef74040be5f820496d77e553d36fa0dba2aeb799ebb708cd23febe1e72b4",
+      "size": 11964
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/994194d0e0a1cc94e8f20634211ccf0cd37fd73c7df434fe00f7a58b873f81f6.blob",
+      "sha256": "994194d0e0a1cc94e8f20634211ccf0cd37fd73c7df434fe00f7a58b873f81f6",
+      "size": 200779
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/9c015ee8676d39878c874531380144a2ffbb973e6a32a2429dca3e184c0a1e1a.blob",
+      "sha256": "9c015ee8676d39878c874531380144a2ffbb973e6a32a2429dca3e184c0a1e1a",
+      "size": 153677
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/9c92c401ce8668c038c0e60845600ae0aa965a6a56ae7d3b8e5fde1c052b3ce1.blob",
+      "sha256": "9c92c401ce8668c038c0e60845600ae0aa965a6a56ae7d3b8e5fde1c052b3ce1",
+      "size": 27404
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/9d76a2f698bd374c73464a19065c85b28d0a07b75876e039e76a9d364a54b5a7.blob",
+      "sha256": "9d76a2f698bd374c73464a19065c85b28d0a07b75876e039e76a9d364a54b5a7",
+      "size": 799223
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/9e4b67dc4eb843391bc7cc2f1cf87e5c5010ce3c8f7a897f8efb35a8c4fa9ba4.blob",
+      "sha256": "9e4b67dc4eb843391bc7cc2f1cf87e5c5010ce3c8f7a897f8efb35a8c4fa9ba4",
+      "size": 23809
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/ae988d28078c483fb8d35c2a3cd8e2a51e475d8cc9697ca8c4c3319d36aae6fe.blob",
+      "sha256": "ae988d28078c483fb8d35c2a3cd8e2a51e475d8cc9697ca8c4c3319d36aae6fe",
+      "size": 89040
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b0bf48044bad0da553647c534bda00ffc06c6d05cd058a5151a30d35053f6a91.blob",
+      "sha256": "b0bf48044bad0da553647c534bda00ffc06c6d05cd058a5151a30d35053f6a91",
+      "size": 96206
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b1dd628b1c73e26b4b3ee1a828f6af165e71f3c31674daab51f498d620f0fcf8.blob",
+      "sha256": "b1dd628b1c73e26b4b3ee1a828f6af165e71f3c31674daab51f498d620f0fcf8",
+      "size": 63262
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b2612fe7c219db6976eaae2b189453e3a27b01894f53482f835c1307fc63f901.blob",
+      "sha256": "b2612fe7c219db6976eaae2b189453e3a27b01894f53482f835c1307fc63f901",
+      "size": 27847
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b308826c6b8d206e08f81d31631624c56db1876aa786350bb6fc2f04f93a6f7f.blob",
+      "sha256": "b308826c6b8d206e08f81d31631624c56db1876aa786350bb6fc2f04f93a6f7f",
+      "size": 17916
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b5620c2c1aa86b2e7a4e82dc6146412f77655499949501550a01de987bd6e191.blob",
+      "sha256": "b5620c2c1aa86b2e7a4e82dc6146412f77655499949501550a01de987bd6e191",
+      "size": 21078
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b8a4f5d282dbf70af2a054d48dd9021b6ed21ef08210f39b2b90b61ae34c9da5.blob",
+      "sha256": "b8a4f5d282dbf70af2a054d48dd9021b6ed21ef08210f39b2b90b61ae34c9da5",
+      "size": 195862
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b8ea9461da4b2ab075c002c0b30368c259700dc9f055d652f34cd289f9515381.blob",
+      "sha256": "b8ea9461da4b2ab075c002c0b30368c259700dc9f055d652f34cd289f9515381",
+      "size": 280620
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b981bc5a1cb686ad121420f77a14c9cf2f1dea6e2acc22e4b549a62dcabb862a.blob",
+      "sha256": "b981bc5a1cb686ad121420f77a14c9cf2f1dea6e2acc22e4b549a62dcabb862a",
+      "size": 21131
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/b9d31682da9fcb933bec21a1b5e4c1aa5deb8d8b1be4b326eec2f7c62784d8a2.blob",
+      "sha256": "b9d31682da9fcb933bec21a1b5e4c1aa5deb8d8b1be4b326eec2f7c62784d8a2",
+      "size": 247983
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/bbcf57cae4a7f4d5815e975a74101411d2b886dfd0f9a65347b4d86461c31c35.blob",
+      "sha256": "bbcf57cae4a7f4d5815e975a74101411d2b886dfd0f9a65347b4d86461c31c35",
+      "size": 317495
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/bf0d0b1c62adfaa081559733d4106955f23821361e1a64cbf8b4d541b6a591b6.blob",
+      "sha256": "bf0d0b1c62adfaa081559733d4106955f23821361e1a64cbf8b4d541b6a591b6",
+      "size": 28408
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/c242e687c62b5e0b416074f4de10498ca8749a42fd639b5fc028ba1f732c7d48.blob",
+      "sha256": "c242e687c62b5e0b416074f4de10498ca8749a42fd639b5fc028ba1f732c7d48",
+      "size": 15121
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/c32d2a79d39c09ba9277e17261f619bac1e675bfc3befcad455b2a937e85617a.blob",
+      "sha256": "c32d2a79d39c09ba9277e17261f619bac1e675bfc3befcad455b2a937e85617a",
+      "size": 178740
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/c48afe7caa1b60445ec30fc956ca6198b55c2a0eab614dc5ceb057aa6fb95398.blob",
+      "sha256": "c48afe7caa1b60445ec30fc956ca6198b55c2a0eab614dc5ceb057aa6fb95398",
+      "size": 7058
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/c7dd22285047d0032597d0a4ba1bd5e61ba771aa64cf8a2fe57c38a0c3733185.blob",
+      "sha256": "c7dd22285047d0032597d0a4ba1bd5e61ba771aa64cf8a2fe57c38a0c3733185",
+      "size": 95213
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/c8c79fa26cdb893fd1c3148e855182214b94ef4f5ae80bfee99b7b0805b12d1f.blob",
+      "sha256": "c8c79fa26cdb893fd1c3148e855182214b94ef4f5ae80bfee99b7b0805b12d1f",
+      "size": 693089
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/ca2d89c018c7c5d0a51315dce48639cca4613aa62cb03c4b5118ca371364c986.blob",
+      "sha256": "ca2d89c018c7c5d0a51315dce48639cca4613aa62cb03c4b5118ca371364c986",
+      "size": 19235
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/db161fa4481fd01d32b78a5370f36e65c0ebd2e89b30052c417703ef2ef53797.blob",
+      "sha256": "db161fa4481fd01d32b78a5370f36e65c0ebd2e89b30052c417703ef2ef53797",
+      "size": 82998
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/db533c3fc4f403327217b5b142adba96f0c080634102abf45bd668081fb7f3f1.blob",
+      "sha256": "db533c3fc4f403327217b5b142adba96f0c080634102abf45bd668081fb7f3f1",
+      "size": 23156
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/df093758c54cee7dc0b31dd8b9eca34bf07142e84bc89b51e76d26d65c7654fd.blob",
+      "sha256": "df093758c54cee7dc0b31dd8b9eca34bf07142e84bc89b51e76d26d65c7654fd",
+      "size": 269151
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/e158d058b393c409339b365c0ee4f041709b59518b0db2add5508a54529c49e0.blob",
+      "sha256": "e158d058b393c409339b365c0ee4f041709b59518b0db2add5508a54529c49e0",
+      "size": 31428
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/e17418241d4089ad0fdfeb25ace1f21af519a9370174f4a6c4c802be4d033cb8.blob",
+      "sha256": "e17418241d4089ad0fdfeb25ace1f21af519a9370174f4a6c4c802be4d033cb8",
+      "size": 18309
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/e3f79380324b009aa482f4e5f9160894d38e6070d986954ce3e3a6d14ecdf426.blob",
+      "sha256": "e3f79380324b009aa482f4e5f9160894d38e6070d986954ce3e3a6d14ecdf426",
+      "size": 67318
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/e91994d7c921b99eaf8eb0a6863d9d9509e9b23f3e8198f3fb818ca77aa632c4.blob",
+      "sha256": "e91994d7c921b99eaf8eb0a6863d9d9509e9b23f3e8198f3fb818ca77aa632c4",
+      "size": 157347
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/eae4c7d269caa3a30c7a58d2accf932e38282e0abc0f39a999987d2c40b5e00b.blob",
+      "sha256": "eae4c7d269caa3a30c7a58d2accf932e38282e0abc0f39a999987d2c40b5e00b",
+      "size": 264020
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/eda57ba97a93729fccc72d9e761e5000840a8328536012271dfe59ee230136ff.blob",
+      "sha256": "eda57ba97a93729fccc72d9e761e5000840a8328536012271dfe59ee230136ff",
+      "size": 11028
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/ef803fb7d76ff92fe282daa4f91caf013e3f0bdf252a79fc0cf945c0f95724a7.blob",
+      "sha256": "ef803fb7d76ff92fe282daa4f91caf013e3f0bdf252a79fc0cf945c0f95724a7",
+      "size": 16353
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/f54938e7d0115d94b36e7e224162acab7efe9684a4822d3a6d1fc2c33db33a8f.blob",
+      "sha256": "f54938e7d0115d94b36e7e224162acab7efe9684a4822d3a6d1fc2c33db33a8f",
+      "size": 25315
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/f80f181ea229f0bc4bb5654dd819f650d7cbb3f11936619f1d44b5149e5b928f.blob",
+      "sha256": "f80f181ea229f0bc4bb5654dd819f650d7cbb3f11936619f1d44b5149e5b928f",
+      "size": 109503
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/fc8e974d1b4b4b31d2dd67ac0e3c1b87dbd05822bbff0cfbff929a13b7f21c99.blob",
+      "sha256": "fc8e974d1b4b4b31d2dd67ac0e3c1b87dbd05822bbff0cfbff929a13b7f21c99",
+      "size": 204677
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/fcc438a2e3b35d0af393c879eeab4af4289b2250fe2c48477a3b261ea7b45bce.blob",
+      "sha256": "fcc438a2e3b35d0af393c879eeab4af4289b2250fe2c48477a3b261ea7b45bce",
+      "size": 29222
+    },
+    {
+      "path": "/Users/kaden/Library/Application Support/Copythat/history-media/fdc2a758e2c4acfdbd6c51b86de4f09cad96b8c78f72775da4b52511d801a2f5.blob",
+      "sha256": "fdc2a758e2c4acfdbd6c51b86de4f09cad96b8c78f72775da4b52511d801a2f5",
+      "size": 422061
+    },
+    {
+      "path": "/Users/kaden/Library/Preferences/local.copythat.clipboard.plist",
+      "sha256": "a00bbfc58686d19c68e0bbf711c63f78426501b25e9d440211f5e1146f6f8d04",
+      "size": 423
+    }
+  ],
+  "defaultsExportSHA256": "39b21b4e866fa84725f92dd72e9f6edcb43b1ec24b6ed198666763fa82f2a41e"
+}

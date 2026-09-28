@@ -10,11 +10,46 @@ private struct PendingObservation {
     let firstObservedUptime: TimeInterval
 }
 
+/// Registry for Store-owned link preview tasks so releasing the Store cancels
+/// remaining preview work. Entries are removed when their completion is handled;
+/// `cancelAll` is thread-safe so a nonisolated deinit can cancel stragglers.
+final class LinkPreviewTaskRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tasks: [UUID: Task<Void, Never>] = [:]
+
+    func put(_ key: UUID, task: Task<Void, Never>) {
+        lock.lock()
+        tasks[key] = task
+        lock.unlock()
+    }
+
+    func remove(_ key: UUID) {
+        lock.lock()
+        tasks[key] = nil
+        lock.unlock()
+    }
+
+    func cancelAll() {
+        lock.lock()
+        let registered = Array(tasks.values)
+        tasks.removeAll()
+        lock.unlock()
+        for task in registered {
+            task.cancel()
+        }
+    }
+}
+
 @MainActor
 final class ClipboardStore: ObservableObject {
     @Published private(set) var items: [ClipboardItem] = []
     @Published private(set) var filteredItems: [ClipboardItem] = []
-    @Published var selectedID: UUID?
+    @Published var selectedID: UUID? {
+        didSet {
+            guard !isMutatingHistoryState else { return }
+            reconcileLinkPreviewFallback()
+        }
+    }
     @Published var searchText = "" {
         didSet { refreshFilteredItems() }
     }
@@ -26,7 +61,7 @@ final class ClipboardStore: ObservableObject {
     private let pasteboard: NSPasteboard
     private let settings: AppSettings
     private let sourceTracker: CopySourceTracker
-    private let diagnostics: ClipboardDiagnostics
+    let diagnostics: ClipboardDiagnostics
     private let persistItems: ([ClipboardItem]) -> Void
     private var timer: Timer?
     private var pollTask: Task<Void, Never>?
@@ -37,12 +72,43 @@ final class ClipboardStore: ObservableObject {
     private var burstTask: Task<Void, Never>?
     private var burstDeadline: TimeInterval?
     private var burstGeneration = 0
-    private let uptimeProvider: () -> TimeInterval
+    let uptimeProvider: () -> TimeInterval
     private let minimumStabilityInterval: TimeInterval
     private let burstPollInterval: TimeInterval
     private let burstWindow: TimeInterval
     private var deletedContentKeys: [String] = []
     private let maxDeletedContentKeys = 256
+
+    // Link preview orchestration state. Extensitivity lives in
+    // `ClipboardStore+LinkPreview.swift`; visibility here stays internal so the
+    // same-module extension can operate on the single source of truth.
+    typealias LinkMetadataLoader = @Sendable (URL) async throws -> LinkPreviewMetadata
+    typealias LinkSnapshotLoader = @Sendable (URL) async throws -> Data
+
+    private(set) var panelVisible = false
+    let fetchLinkMetadata: LinkMetadataLoader
+    let fetchLinkSnapshot: LinkSnapshotLoader
+    var linkMetadataStates: [UUID: LinkMetadataState] = [:]
+    var metadataTasks: [UUID: Task<Void, Never>] = [:]
+    var metadataRequestIDs: [UUID: UUID] = [:]
+    var activeFallback: (request: LinkFallbackRequest, isCancelled: Bool)?
+    var fallbackTask: Task<Void, Never>?
+    var snapshotPositiveCache: [String: Data] = [:]
+    var snapshotPositiveCacheOrder: [String] = []
+    var snapshotNegativeUntil: [String: TimeInterval] = [:]
+    let snapshotCacheLimit = 64
+    let snapshotRetryTTL: TimeInterval = 300
+    var isMutatingHistoryState = false
+    /// Deterministic test seam: invoked on the main actor after processing each
+    /// link preview completion, letting tests await checkpoints without sleeps.
+    var linkPreviewHandledObserver: (() -> Void)?
+    let linkPreviewTasks = LinkPreviewTaskRegistry()
+
+    /// `items` keeps a private setter; preview enrichment updates through this
+    /// internal helper so the orchestration extension can replace single items.
+    func updateItem(at index: Int, transform: (ClipboardItem) -> ClipboardItem) {
+        items[index] = transform(items[index])
+    }
 
     init(
         settings: AppSettings,
@@ -52,6 +118,8 @@ final class ClipboardStore: ObservableObject {
         diagnostics: ClipboardDiagnostics = ClipboardDiagnostics(),
         persistItems: @escaping ([ClipboardItem]) -> Void = ClipboardHistoryPersistence.save,
         uptimeProvider: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        fetchLinkMetadata: @escaping LinkMetadataLoader = { try await LinkPreviewFetcher.fetchMetadata(url: $0) },
+        fetchLinkSnapshot: @escaping LinkSnapshotLoader = { try await LinkPreviewFetcher.fetchWebSnapshot(url: $0) },
         minimumStabilityInterval: TimeInterval = 0.15,
         burstPollInterval: TimeInterval = 0.06,
         burstWindow: TimeInterval = 0.6
@@ -62,12 +130,20 @@ final class ClipboardStore: ObservableObject {
         self.diagnostics = diagnostics
         self.persistItems = persistItems
         self.uptimeProvider = uptimeProvider
+        self.fetchLinkMetadata = fetchLinkMetadata
+        self.fetchLinkSnapshot = fetchLinkSnapshot
         self.minimumStabilityInterval = minimumStabilityInterval
         self.burstPollInterval = burstPollInterval
         self.burstWindow = burstWindow
         lastChangeCount = pasteboard.changeCount
         items = initialItems ?? ClipboardHistoryPersistence.loadItems()
         refreshFilteredItems()
+    }
+
+    deinit {
+        // Store release must cancel remaining preview work without touching
+        // actor state; the registry itself is thread-safe.
+        linkPreviewTasks.cancelAll()
     }
 
     var selectedItem: ClipboardItem? {
@@ -84,32 +160,191 @@ final class ClipboardStore: ObservableObject {
         extendBurst()
     }
 
-    func startMonitoring() {
-        guard !isMonitoring else { return }
-        isMonitoring = true
-        timer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.pollTask?.cancel()
-                self.pollTask = Task { @MainActor [weak self] in
-                    guard !Task.isCancelled else { return }
-                    self?.pollPasteboard()
-                }
-            }
+    // MARK: - Panel visibility
+
+    /// Called by PanelWindowController once the window is displayed and its
+    /// selection is ready. Authorizes fallback evaluation for the visible
+    /// selected URL; metadata enrichment is independent of visibility.
+    func panelDidOpen() {
+        panelVisible = true
+        if let selectedID {
+            diagnostics.logLinkPreview(itemID: selectedID, outcome: .panelOpened, uptime: uptimeProvider())
+        }
+        reconcileLinkPreviewFallback()
+    }
+
+    /// Called by PanelWindowController before the window is ordered out. Closing
+    /// revokes eligibility first so NSHostingView retention cannot keep a
+    /// fallback alive, and metadata enrichment continues.
+    func panelDidClose() {
+        panelVisible = false
+        if let itemID = activeFallback?.request.target.itemID ?? selectedID {
+            diagnostics.logLinkPreview(itemID: itemID, outcome: .panelClosed, uptime: uptimeProvider())
+        }
+        reconcileLinkPreviewFallback()
+    }
+
+    /// Latest-wins evaluation entry for the browser fallback and lazy metadata.
+    /// All panel visibility, selection, filtering and completion paths funnel
+    /// here; mid-mutation calls are deferred to the end of the mutation.
+    func reconcileLinkPreviewFallback() {
+        guard !isMutatingHistoryState else {
+            return
+        }
+        performLinkPreviewReconcile()
+    }
+}
+
+// MARK: - Selection and history mutations
+
+extension ClipboardStore {
+    func selectFirstVisibleItem() {
+        selectID(filteredItems.first?.id)
+    }
+
+    func clearPermissionMessage() {
+        permissionMessage = nil
+    }
+
+    func select(_ item: ClipboardItem) {
+        selectID(item.id)
+    }
+
+    func moveSelection(_ delta: Int) {
+        let visible = filteredItems
+        guard !visible.isEmpty else {
+            selectID(nil)
+            return
+        }
+        let currentIndex = visible.firstIndex { $0.id == selectedID } ?? 0
+        let nextIndex = min(max(currentIndex + delta, 0), visible.count - 1)
+        selectID(visible[nextIndex].id)
+    }
+
+    func togglePin(_ item: ClipboardItem) {
+        withHistoryStateMutation {
+            guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+            items[index].isPinned.toggle()
+            refreshFilteredItems()
+            saveItems()
         }
     }
 
-    func stopMonitoring() {
-        isMonitoring = false
-        timer?.invalidate()
-        timer = nil
-        pollTask?.cancel()
-        pollTask = nil
-        cancelBurstScheduling()
-        imageEncodingTask?.cancel()
-        imageEncodingTask = nil
+    func move(_ item: ClipboardItem, toPinboard name: String?) {
+        withHistoryStateMutation {
+            guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+            items[index].pinboardName = name
+            refreshFilteredItems()
+            saveItems()
+        }
     }
 
+    func pinboardAssignmentCount(named name: String) -> Int {
+        items.filter { $0.pinboardName == name }.count
+    }
+
+    func clearPinboardAssignments(named name: String) {
+        withHistoryStateMutation {
+            var didChange = false
+            for index in items.indices where items[index].pinboardName == name {
+                items[index].pinboardName = nil
+                didChange = true
+            }
+
+            guard didChange else { return }
+            refreshFilteredItems()
+            saveItems()
+        }
+    }
+
+    func renamePinboardAssignments(from oldName: String, to newName: String) {
+        withHistoryStateMutation {
+            var didChange = false
+            for index in items.indices where items[index].pinboardName == oldName {
+                items[index].pinboardName = newName
+                didChange = true
+            }
+
+            guard didChange else { return }
+            refreshFilteredItems()
+            saveItems()
+        }
+    }
+
+    func migrateSelectionAfterPinboardRename(from oldName: String, to newName: String) {
+        guard selectedBoardID == Pinboard.custom(oldName).id else { return }
+        selectedBoardID = Pinboard.custom(newName).id
+    }
+
+    func selectClipboardIfViewingPinboard(named name: String) {
+        guard selectedBoardID == Pinboard.custom(name).id else { return }
+        selectedBoardID = Pinboard.all.id
+    }
+
+    func remove(_ item: ClipboardItem) {
+        withHistoryStateMutation {
+            let removedItems = items.filter { $0.id == item.id }
+            guard !removedItems.isEmpty else { return }
+            rememberDeleted(removedItems)
+            cancelPendingImageEncoding()
+            clearSystemPasteboardIfMatching(removedItems)
+            items.removeAll { $0.id == item.id }
+            cleanupLinkPreviewWork(forRemovedItemIDs: removedItems.map(\.id))
+            refreshFilteredItems()
+            saveItems()
+        }
+    }
+
+    @discardableResult
+    func clearHistory(includePinnedAndPinboardItems: Bool) -> Int {
+        withHistoryStateMutation {
+            let removedItems = items.filter { item in
+                includePinnedAndPinboardItems || (!item.isPinned && item.pinboardName == nil)
+            }
+            guard !removedItems.isEmpty else { return 0 }
+            rememberDeleted(removedItems)
+            cancelPendingImageEncoding()
+            clearSystemPasteboardIfMatching(removedItems)
+
+            if includePinnedAndPinboardItems {
+                items.removeAll()
+            } else {
+                items.removeAll { !$0.isPinned && $0.pinboardName == nil }
+            }
+
+            cleanupLinkPreviewWork(forRemovedItemIDs: removedItems.map(\.id))
+            refreshFilteredItems()
+            saveItems()
+            return removedItems.count
+        }
+    }
+
+    func hasDeletedContentKey(_ key: String) -> Bool {
+        deletedContentKeys.contains(key)
+    }
+
+    func shouldInsertEncodedItem(_ item: ClipboardItem) -> Bool {
+        !hasDeletedContentKey(item.contentKey)
+    }
+
+    var hasPendingImageEncodingTask: Bool {
+        imageEncodingTask != nil
+    }
+
+    /// Existing persistence entry point for a validated preview. All snapshot
+    /// and metadata updates keep flowing through this path so history save
+    /// coordination and media blob handling stay in one place.
+    func applyLinkPreview(itemID: UUID, title: String?, imageData: Data?) {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        items[index] = items[index].withLinkPreview(title: title, linkImageData: imageData).storageOptimized
+        refreshFilteredItems()
+        saveItems()
+    }
+}
+
+// MARK: - Clipboard polling and capture
+
+extension ClipboardStore {
     func pollPasteboard() {
         let now = uptimeProvider()
         let currentChangeCount = pasteboard.changeCount
@@ -156,111 +391,58 @@ final class ClipboardStore: ObservableObject {
         add(newItem)
     }
 
-    func selectFirstVisibleItem() {
-        selectID(filteredItems.first?.id)
-    }
-
-    func clearPermissionMessage() {
-        permissionMessage = nil
-    }
-
-    func select(_ item: ClipboardItem) {
-        selectID(item.id)
-    }
-
-    func moveSelection(_ delta: Int) {
-        let visible = filteredItems
-        guard !visible.isEmpty else {
-            selectID(nil)
-            return
+    func startMonitoring() {
+        guard !isMonitoring else { return }
+        isMonitoring = true
+        timer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.pollTask?.cancel()
+                self.pollTask = Task { @MainActor [weak self] in
+                    guard !Task.isCancelled else { return }
+                    self?.pollPasteboard()
+                }
+            }
         }
-        let currentIndex = visible.firstIndex { $0.id == selectedID } ?? 0
-        let nextIndex = min(max(currentIndex + delta, 0), visible.count - 1)
-        selectID(visible[nextIndex].id)
     }
 
-    func togglePin(_ item: ClipboardItem) {
-        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-        items[index].isPinned.toggle()
-        refreshFilteredItems()
-        saveItems()
+    func stopMonitoring() {
+        isMonitoring = false
+        timer?.invalidate()
+        timer = nil
+        pollTask?.cancel()
+        pollTask = nil
+        cancelBurstScheduling()
+        imageEncodingTask?.cancel()
+        imageEncodingTask = nil
     }
 
-    func move(_ item: ClipboardItem, toPinboard name: String?) {
-        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-        items[index].pinboardName = name
-        refreshFilteredItems()
-        saveItems()
+    private var ignoredApplications: [String] {
+        settings.ignoredApplications
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
-    func pinboardAssignmentCount(named name: String) -> Int {
-        items.filter { $0.pinboardName == name }.count
-    }
-
-    func clearPinboardAssignments(named name: String) {
-        var didChange = false
-        for index in items.indices where items[index].pinboardName == name {
-            items[index].pinboardName = nil
-            didChange = true
+    func add(_ item: ClipboardItem) {
+        withHistoryStateMutation {
+            let beforeIDs = Set(items.map(\.id))
+            let duplicateMetadata = ClipboardDiagnostics.duplicateMetadata(for: item, in: items)
+            let insertion = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
+            items = insertion.items
+            diagnostics.logInsertion(
+                item: item,
+                beforeCount: beforeIDs.count,
+                afterCount: items.count,
+                duplicateMetadata: duplicateMetadata
+            )
+            let removedIDs = beforeIDs.subtracting(insertion.items.map(\.id))
+            cleanupLinkPreviewWork(forRemovedItemIDs: Array(removedIDs))
+            refreshFilteredItems()
+            selectedID = insertion.selectedID
+            saveItems()
+            registerLinkMetadataIfNeeded(for: insertion.insertedItem)
         }
-
-        guard didChange else { return }
-        refreshFilteredItems()
-        saveItems()
-    }
-
-    func renamePinboardAssignments(from oldName: String, to newName: String) {
-        var didChange = false
-        for index in items.indices where items[index].pinboardName == oldName {
-            items[index].pinboardName = newName
-            didChange = true
-        }
-
-        guard didChange else { return }
-        refreshFilteredItems()
-        saveItems()
-    }
-
-    func migrateSelectionAfterPinboardRename(from oldName: String, to newName: String) {
-        guard selectedBoardID == Pinboard.custom(oldName).id else { return }
-        selectedBoardID = Pinboard.custom(newName).id
-    }
-
-    func selectClipboardIfViewingPinboard(named name: String) {
-        guard selectedBoardID == Pinboard.custom(name).id else { return }
-        selectedBoardID = Pinboard.all.id
-    }
-
-    func remove(_ item: ClipboardItem) {
-        let removedItems = items.filter { $0.id == item.id }
-        guard !removedItems.isEmpty else { return }
-        rememberDeleted(removedItems)
-        cancelPendingImageEncoding()
-        clearSystemPasteboardIfMatching(removedItems)
-        items.removeAll { $0.id == item.id }
-        refreshFilteredItems()
-        saveItems()
-    }
-
-    @discardableResult
-    func clearHistory(includePinnedAndPinboardItems: Bool) -> Int {
-        let removedItems = items.filter { item in
-            includePinnedAndPinboardItems || (!item.isPinned && item.pinboardName == nil)
-        }
-        guard !removedItems.isEmpty else { return 0 }
-        rememberDeleted(removedItems)
-        cancelPendingImageEncoding()
-        clearSystemPasteboardIfMatching(removedItems)
-
-        if includePinnedAndPinboardItems {
-            items.removeAll()
-        } else {
-            items.removeAll { !$0.isPinned && $0.pinboardName == nil }
-        }
-
-        refreshFilteredItems()
-        saveItems()
-        return removedItems.count
     }
 
     func writeToPasteboard(_ item: ClipboardItem) -> Bool {
@@ -285,44 +467,6 @@ final class ClipboardStore: ObservableObject {
         return didWrite
     }
 
-    private var ignoredApplications: [String] {
-        settings.ignoredApplications
-            .split(separator: "\n")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    func add(_ item: ClipboardItem) {
-        let beforeCount = items.count
-        let duplicateMetadata = ClipboardDiagnostics.duplicateMetadata(for: item, in: items)
-        let insertion = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
-        items = insertion.items
-        diagnostics.logInsertion(
-            item: item,
-            beforeCount: beforeCount,
-            afterCount: items.count,
-            duplicateMetadata: duplicateMetadata
-        )
-        refreshFilteredItems()
-        selectedID = insertion.selectedID
-        saveItems()
-        if let insertedItem = insertion.insertedItem {
-            enrichLinkPreviewIfNeeded(for: insertedItem)
-        }
-    }
-
-    func hasDeletedContentKey(_ key: String) -> Bool {
-        deletedContentKeys.contains(key)
-    }
-
-    func shouldInsertEncodedItem(_ item: ClipboardItem) -> Bool {
-        !hasDeletedContentKey(item.contentKey)
-    }
-
-    var hasPendingImageEncodingTask: Bool {
-        imageEncodingTask != nil
-    }
-
     private func readCurrentPasteboard(
         changeCountDelta: Int,
         currentChangeCount: Int,
@@ -341,20 +485,7 @@ final class ClipboardStore: ObservableObject {
                     currentChangeCount: currentChangeCount,
                     firstObservedSource: firstObservedSource
                 )
-                return ClipboardItem(
-                    id: UUID(),
-                    kind: .file,
-                    title: fileURLs.count == 1 ? fileURLs[0].lastPathComponent : "\(fileURLs.count) files",
-                    preview: fileURLs.map(\.path).joined(separator: "\n"),
-                    sourceApp: source.appName,
-                    sourceAppIconData: source.iconData,
-                    createdAt: Date(),
-                    isPinned: false,
-                    pinboardName: nil,
-                    textValue: nil,
-                    fileURLs: fileURLs,
-                    imageData: nil
-                )
+                return makeFileItem(fileURLs: fileURLs, source: source)
             }
         }
 
@@ -382,20 +513,7 @@ final class ClipboardStore: ObservableObject {
                 currentChangeCount: currentChangeCount,
                 firstObservedSource: firstObservedSource
             )
-            return ClipboardItem(
-                id: UUID(),
-                kind: .url,
-                title: url.host(percentEncoded: false) ?? string,
-                preview: string,
-                sourceApp: source.appName,
-                sourceAppIconData: source.iconData,
-                createdAt: Date(),
-                isPinned: false,
-                pinboardName: nil,
-                textValue: string,
-                fileURLs: [],
-                imageData: nil
-            )
+            return makeURLItem(url: url, rawString: string, source: source)
         }
 
         let possibleFile = URL(fileURLWithPath: string)
@@ -406,20 +524,7 @@ final class ClipboardStore: ObservableObject {
                 currentChangeCount: currentChangeCount,
                 firstObservedSource: firstObservedSource
             )
-            return ClipboardItem(
-                id: UUID(),
-                kind: .file,
-                title: possibleFile.lastPathComponent,
-                preview: possibleFile.path,
-                sourceApp: source.appName,
-                sourceAppIconData: source.iconData,
-                createdAt: Date(),
-                isPinned: false,
-                pinboardName: nil,
-                textValue: nil,
-                fileURLs: [possibleFile],
-                imageData: nil
-            )
+            return makeFileItem(fileURLs: [possibleFile], source: source)
         }
 
         let firstLine = string.components(separatedBy: .newlines).first ?? string
@@ -429,46 +534,58 @@ final class ClipboardStore: ObservableObject {
             currentChangeCount: currentChangeCount,
             firstObservedSource: firstObservedSource
         )
-        return ClipboardItem(
+        return makeTextItem(text: string, title: firstLine.truncated(to: 42), source: source)
+    }
+
+    private func makeFileItem(fileURLs: [URL], source: ClipboardSource) -> ClipboardItem {
+        ClipboardItem(
             id: UUID(),
-            kind: .text,
-            title: firstLine.truncated(to: 42),
-            preview: string.truncated(to: 240),
+            kind: .file,
+            title: fileURLs.count == 1 ? fileURLs[0].lastPathComponent : "\(fileURLs.count) files",
+            preview: fileURLs.map(\.path).joined(separator: "\n"),
             sourceApp: source.appName,
             sourceAppIconData: source.iconData,
             createdAt: Date(),
             isPinned: false,
             pinboardName: nil,
-            textValue: string,
+            textValue: nil,
+            fileURLs: fileURLs,
+            imageData: nil
+        )
+    }
+
+    private func makeURLItem(url: URL, rawString: String, source: ClipboardSource) -> ClipboardItem {
+        ClipboardItem(
+            id: UUID(),
+            kind: .url,
+            title: url.host(percentEncoded: false) ?? rawString,
+            preview: rawString,
+            sourceApp: source.appName,
+            sourceAppIconData: source.iconData,
+            createdAt: Date(),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: rawString,
             fileURLs: [],
             imageData: nil
         )
     }
 
-    private func enrichLinkPreviewIfNeeded(for item: ClipboardItem) {
-        let rawURL = (item.textValue ?? item.preview).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard item.kind == .url,
-              item.linkTitle == nil,
-              item.linkImageData == nil,
-              let url = URL(string: rawURL) else {
-            return
-        }
-
-        Task { [weak self, itemID = item.id] in
-            guard let metadata = await LinkPreviewFetcher.fetch(url: url) else { return }
-            self?.applyLinkPreview(
-                itemID: itemID,
-                title: metadata.title,
-                imageData: metadata.imageData
-            )
-        }
-    }
-
-    func applyLinkPreview(itemID: UUID, title: String?, imageData: Data?) {
-        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
-        items[index] = items[index].withLinkPreview(title: title, linkImageData: imageData).storageOptimized
-        refreshFilteredItems()
-        saveItems()
+    private func makeTextItem(text: String, title: String, source: ClipboardSource) -> ClipboardItem {
+        ClipboardItem(
+            id: UUID(),
+            kind: .text,
+            title: title,
+            preview: text.truncated(to: 240),
+            sourceApp: source.appName,
+            sourceAppIconData: source.iconData,
+            createdAt: Date(),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: text,
+            fileURLs: [],
+            imageData: nil
+        )
     }
 
     private func enqueueImageItem(
@@ -541,8 +658,132 @@ final class ClipboardStore: ObservableObject {
         cancelBurstScheduling()
     }
 
-    // MARK: - Bounded burst polling
+    private func pasteboardContainsSystemScreenshot() -> Bool {
+        pasteboard.types?.contains { type in
+            type.rawValue.localizedCaseInsensitiveContains("screenshot")
+        } ?? false
+    }
 
+    private func pasteboardContainsSensitiveContent() -> Bool {
+        pasteboard.types?.contains { type in
+            let rawValue = type.rawValue.localizedLowercase
+            return rawValue.contains("concealed") ||
+                rawValue.contains("1password") ||
+                rawValue.contains("bitwarden") ||
+                rawValue.contains("keychain") ||
+                rawValue.contains("keepass") ||
+                rawValue.contains("lastpass") ||
+                rawValue.contains("dashlane")
+        } ?? false
+    }
+
+    private func pasteboardMatches(_ item: ClipboardItem) -> Bool {
+        switch item.kind {
+        case .text, .url:
+            return pasteboard.string(forType: .string) == (item.textValue ?? item.preview)
+        case .file:
+            guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] else {
+                return false
+            }
+            let currentPaths = urls.filter(\.isFileURL).map(\.path)
+            return currentPaths == item.fileURLs.map(\.path)
+        case .image:
+            guard let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+                  let image = images.first,
+                  let currentContentKey = imageContentKey(for: image) else {
+                return false
+            }
+            return currentContentKey == item.contentKey
+        }
+    }
+}
+
+// MARK: - Source attribution helpers
+
+extension ClipboardStore {
+    func normalizedImageData(for image: NSImage) -> Data? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let data = Self.pngData(cgImage: cgImage, maxPixel: 1_200) else { return nil }
+        return data
+    }
+
+    private func sourceMetadata(
+        kind: ClipboardKind,
+        isSystemGeneratedContent: Bool = false,
+        changeCountDelta: Int,
+        currentChangeCount: Int,
+        firstObservedSource: ClipboardSource?
+    ) -> ClipboardSource {
+        let source = sourceTracker.resolveSource(
+            isSystemGeneratedContent: isSystemGeneratedContent,
+            firstObservedSource: firstObservedSource,
+            pasteboardChangeCountDelta: changeCountDelta,
+            currentPasteboardChangeCount: currentChangeCount
+        )
+        diagnostics.logCapture(
+            kind: kind,
+            source: source,
+            currentChangeCount: currentChangeCount,
+            changeCountDelta: changeCountDelta
+        )
+        return source
+    }
+
+    private func imageContentKey(for image: NSImage) -> String? {
+        guard let data = normalizedImageData(for: image) else { return nil }
+        return ClipboardItem(
+            id: UUID(),
+            kind: .image,
+            title: "Image",
+            preview: "",
+            sourceApp: "",
+            sourceAppIconData: nil,
+            createdAt: Date(),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: nil,
+            fileURLs: [],
+            imageData: data
+        ).contentKey
+    }
+
+    private nonisolated static func pngData(cgImage: CGImage, maxPixel: CGFloat) -> Data? {
+        let largestSide = max(cgImage.width, cgImage.height)
+        guard largestSide > 0 else { return nil }
+        let scale = min(1, maxPixel / CGFloat(largestSide))
+        let width = max(1, Int((CGFloat(cgImage.width) * scale).rounded()))
+        let height = max(1, Int((CGFloat(cgImage.height) * scale).rounded()))
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let resized = context.makeImage() else { return nil }
+
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, resized, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
+}
+
+// MARK: - Bounded burst polling, filtering and persistence
+
+extension ClipboardStore {
     /// D5: start or extend the burst window only for meaningful activity
     /// (copy intent, a newly observed external count, or a processed stable count).
     /// Repeated signals never accumulate the deadline beyond one window from now (D3):
@@ -602,125 +843,7 @@ final class ClipboardStore: ObservableObject {
         pendingObservation = nil
     }
 
-    private func pasteboardMatches(_ item: ClipboardItem) -> Bool {
-        switch item.kind {
-        case .text, .url:
-            return pasteboard.string(forType: .string) == (item.textValue ?? item.preview)
-        case .file:
-            guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] else {
-                return false
-            }
-            let currentPaths = urls.filter(\.isFileURL).map(\.path)
-            return currentPaths == item.fileURLs.map(\.path)
-        case .image:
-            guard let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-                  let image = images.first,
-                  let currentContentKey = imageContentKey(for: image) else {
-                return false
-            }
-            return currentContentKey == item.contentKey
-        }
-    }
-
-    func normalizedImageData(for image: NSImage) -> Data? {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let data = Self.pngData(cgImage: cgImage, maxPixel: 1_200) else { return nil }
-        return data
-    }
-
-    private func imageContentKey(for image: NSImage) -> String? {
-        guard let data = normalizedImageData(for: image) else { return nil }
-        return ClipboardItem(
-            id: UUID(),
-            kind: .image,
-            title: "Image",
-            preview: "",
-            sourceApp: "",
-            sourceAppIconData: nil,
-            createdAt: Date(),
-            isPinned: false,
-            pinboardName: nil,
-            textValue: nil,
-            fileURLs: [],
-            imageData: data
-        ).contentKey
-    }
-
-    private nonisolated static func pngData(cgImage: CGImage, maxPixel: CGFloat) -> Data? {
-        let largestSide = max(cgImage.width, cgImage.height)
-        guard largestSide > 0 else { return nil }
-        let scale = min(1, maxPixel / CGFloat(largestSide))
-        let width = max(1, Int((CGFloat(cgImage.width) * scale).rounded()))
-        let height = max(1, Int((CGFloat(cgImage.height) * scale).rounded()))
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return nil
-        }
-
-        context.interpolationQuality = .high
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let resized = context.makeImage() else { return nil }
-
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
-            return nil
-        }
-        CGImageDestinationAddImage(destination, resized, nil)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return data as Data
-    }
-
-    private func sourceMetadata(
-        kind: ClipboardKind,
-        isSystemGeneratedContent: Bool = false,
-        changeCountDelta: Int,
-        currentChangeCount: Int,
-        firstObservedSource: ClipboardSource?
-    ) -> ClipboardSource {
-        let source = sourceTracker.resolveSource(
-            isSystemGeneratedContent: isSystemGeneratedContent,
-            firstObservedSource: firstObservedSource,
-            pasteboardChangeCountDelta: changeCountDelta,
-            currentPasteboardChangeCount: currentChangeCount
-        )
-        diagnostics.logCapture(
-            kind: kind,
-            source: source,
-            currentChangeCount: currentChangeCount,
-            changeCountDelta: changeCountDelta
-        )
-        return source
-    }
-
-    private func pasteboardContainsSystemScreenshot() -> Bool {
-        pasteboard.types?.contains { type in
-            type.rawValue.localizedCaseInsensitiveContains("screenshot")
-        } ?? false
-    }
-
-    private func pasteboardContainsSensitiveContent() -> Bool {
-        pasteboard.types?.contains { type in
-            let rawValue = type.rawValue.localizedLowercase
-            return rawValue.contains("concealed") ||
-                rawValue.contains("1password") ||
-                rawValue.contains("bitwarden") ||
-                rawValue.contains("keychain") ||
-                rawValue.contains("keepass") ||
-                rawValue.contains("lastpass") ||
-                rawValue.contains("dashlane")
-        } ?? false
-    }
-
-    private func refreshFilteredItems() {
+    func refreshFilteredItems() {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
         let board = Pinboard(id: selectedBoardID)
         filteredItems = items.filter { item in
@@ -737,68 +860,23 @@ final class ClipboardStore: ObservableObject {
             return boardMatches && searchMatches
         }
         if let selectedID, filteredItems.contains(where: { $0.id == selectedID }) {
+            reconcileLinkPreviewFallback()
             return
         }
         selectID(filteredItems.first?.id)
     }
 
-    private func saveItems() {
+    func saveItems() {
         persistItems(items)
     }
 
     private func selectID(_ id: UUID?) {
-        guard selectedID != id else { return }
+        guard selectedID != id else {
+            // Explicitly selecting the current item still reevaluates cache and
+            // retry state; only duplicate Published updates are suppressed.
+            reconcileLinkPreviewFallback()
+            return
+        }
         selectedID = id
-    }
-}
-
-struct Pinboard: Hashable, Identifiable {
-    enum Kind: Hashable {
-        case all
-        case pinned
-        case custom
-        case unknown
-    }
-
-    let kind: Kind
-    let title: String
-    let customName: String?
-
-    var id: String {
-        switch kind {
-        case .all: "all"
-        case .pinned: "pinned"
-        case .custom: "custom:\(customName ?? "")"
-        case .unknown: "unknown"
-        }
-    }
-
-    static let all = Pinboard(kind: .all, title: "All", customName: nil)
-    static let pinned = Pinboard(kind: .pinned, title: "Pinned", customName: nil)
-
-    static func custom(_ name: String) -> Pinboard {
-        Pinboard(kind: .custom, title: name, customName: name)
-    }
-
-    init(id: String) {
-        switch id {
-        case Self.all.id:
-            self = .all
-        case Self.pinned.id:
-            self = .pinned
-        default:
-            if id.hasPrefix("custom:") {
-                let name = String(id.dropFirst("custom:".count))
-                self = .custom(name)
-            } else {
-                self = Pinboard(kind: .unknown, title: "All", customName: nil)
-            }
-        }
-    }
-
-    init(kind: Kind, title: String, customName: String?) {
-        self.kind = kind
-        self.title = title
-        self.customName = customName
     }
 }

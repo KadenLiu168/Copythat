@@ -105,6 +105,47 @@ verify_signature() {
   codesign -dvvv "$APP_BUNDLE" 2>&1
 }
 
+VERIFY_PID=""
+VERIFY_ROOT=""
+VERIFY_SUITE=""
+
+cleanup_isolated_verify() {
+  if [ -n "$VERIFY_PID" ]; then
+    kill "$VERIFY_PID" 2>/dev/null || true
+    wait "$VERIFY_PID" 2>/dev/null || true
+    VERIFY_PID=""
+  fi
+  if [ -n "$VERIFY_SUITE" ]; then
+    /usr/bin/defaults delete "$VERIFY_SUITE" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$VERIFY_ROOT" ]; then rm -rf "$VERIFY_ROOT"; fi
+}
+
+launch_isolated_verify() {
+  local binary="$1"
+  local open_panel="${2:-0}"
+  VERIFY_ROOT="$(mktemp -d -t copythat_verify)"
+  VERIFY_SUITE="local.copythat.verify.$(uuidgen)"
+  trap cleanup_isolated_verify EXIT
+  COPYTHAT_VERIFY_ROOT="$VERIFY_ROOT" \
+  COPYTHAT_VERIFY_DEFAULTS_SUITE="$VERIFY_SUITE" \
+  COPYTHAT_TEST_PASTEBOARD_NAME="$VERIFY_SUITE.pasteboard" \
+  COPYTHAT_OPEN_PANEL_ON_LAUNCH="$open_panel" \
+    "$binary" &
+  VERIFY_PID=$!
+  echo "isolation root=$VERIFY_ROOT defaults=$VERIFY_SUITE pasteboard=$VERIFY_SUITE.pasteboard pid=$VERIFY_PID"
+  for _ in {1..100}; do
+    if ! kill -0 "$VERIFY_PID" 2>/dev/null; then
+      echo "Isolated app exited before launch completed" >&2
+      return 1
+    fi
+    if [ -f "$VERIFY_ROOT/ready" ]; then return 0; fi
+    sleep 0.2
+  done
+  echo "Isolated app did not complete launch" >&2
+  return 1
+}
+
 verify_portable_app() {
   verify_resource_bundle
 
@@ -113,7 +154,7 @@ verify_portable_app() {
   PORTABLE_HIDDEN_RESOURCE=""
 
   cleanup_portable_verify() {
-    pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+    cleanup_isolated_verify
     if [ -n "$PORTABLE_HIDDEN_RESOURCE" ] && [ -d "$PORTABLE_HIDDEN_RESOURCE" ]; then
       mv "$PORTABLE_HIDDEN_RESOURCE" "$RESOURCE_BUNDLE"
     fi
@@ -129,9 +170,10 @@ verify_portable_app() {
     mv "$RESOURCE_BUNDLE" "$PORTABLE_HIDDEN_RESOURCE"
   fi
 
-  /usr/bin/open -n "$PORTABLE_APP"
+  launch_isolated_verify "$PORTABLE_APP/Contents/MacOS/$APP_NAME"
+  trap cleanup_portable_verify EXIT
   for _ in {1..40}; do
-    if pgrep -x "$APP_NAME" >/dev/null; then
+    if kill -0 "$VERIFY_PID" 2>/dev/null; then
       echo "portable app ok"
       cleanup_portable_verify
       trap - EXIT
@@ -144,7 +186,15 @@ verify_portable_app() {
   exit 1
 }
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+case "$MODE" in
+  --verify|verify|--verify-portable|verify-portable|--verify-panel|verify-panel)
+    if [ "$BUILD_CONFIGURATION" != "debug" ]; then
+      echo "Isolated verification requires a debug build" >&2
+      exit 2
+    fi
+    ;;
+  *) pkill -x "$APP_NAME" >/dev/null 2>&1 || true ;;
+esac
 
 swift_build
 BUILD_BINARY="$(swift_build --show-bin-path)/$APP_NAME"
@@ -243,27 +293,16 @@ case "$MODE" in
     /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
     ;;
   --verify|verify)
-    open_app
+    launch_isolated_verify "$APP_BINARY"
     sleep 1
-    pgrep -x "$APP_NAME" >/dev/null
+    kill -0 "$VERIFY_PID"
     ;;
   --verify-portable|verify-portable)
     verify_portable_app
     ;;
   --verify-panel|verify-panel)
-    /usr/bin/open -n --env COPYTHAT_OPEN_PANEL_ON_LAUNCH=1 "$APP_BUNDLE"
-    APP_PID=""
-    for _ in {1..40}; do
-      APP_PID="$(pgrep -x "$APP_NAME" || true)"
-      if [ -n "$APP_PID" ]; then
-        break
-      fi
-      sleep 0.2
-    done
-    if [ -z "$APP_PID" ]; then
-      echo "Copythat process did not launch" >&2
-      exit 1
-    fi
+    launch_isolated_verify "$APP_BINARY" 1
+    APP_PID="$VERIFY_PID"
     swift - "$APP_PID" <<'SWIFT'
 import CoreGraphics
 import Foundation

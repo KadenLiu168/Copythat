@@ -45,18 +45,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        model.sourceTracker.start()
+        #if DEBUG
+        let isVerification = ProcessInfo.processInfo.environment["COPYTHAT_VERIFY_ROOT"] != nil
+        #else
+        let isVerification = false
+        #endif
+        if !isVerification { model.sourceTracker.start() }
         model.store.startMonitoring()
 
         let panelController = PanelWindowController(model: model)
         self.panelController = panelController
         configureStatusItem()
 
-        hotKeyManager = HotKeyManager {
-            Task { @MainActor in panelController.toggle() }
+        if !isVerification {
+            hotKeyManager = HotKeyManager {
+                Task { @MainActor in panelController.toggle() }
+            }
+            registerGlobalShortcut(named: model.settings.shortcut)
+            bindSettings()
         }
-        registerGlobalShortcut(named: model.settings.shortcut)
-        bindSettings()
 
         if ProcessInfo.processInfo.environment["COPYTHAT_OPEN_PANEL_ON_LAUNCH"] == "1" {
             panelController.show()
@@ -70,6 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.openSettings(nil)
             }
         }
+        #if DEBUG
+        if let root = ProcessInfo.processInfo.environment["COPYTHAT_VERIFY_ROOT"] {
+            try? Data("ready".utf8).write(to: URL(fileURLWithPath: root).appendingPathComponent("ready"))
+        }
+        #endif
     }
 
     private func bindSettings() {

@@ -58,6 +58,7 @@ struct ClipboardStoreSelectionTests {
             settings: settings,
             sourceTracker: CopySourceTracker(),
             initialItems: [assigned, item(text: "Other")],
+            pasteboard: NSPasteboard.withUniqueName(),
             persistItems: { _ in }
         )
 
@@ -76,6 +77,7 @@ struct ClipboardStoreSelectionTests {
             settings: settings,
             sourceTracker: CopySourceTracker(),
             initialItems: [existing],
+            pasteboard: NSPasteboard.withUniqueName(),
             persistItems: { _ in }
         )
 
@@ -286,9 +288,10 @@ struct ClipboardStoreSelectionTests {
         let otherAssigned = item(text: "Other assigned", pinboardName: "Ideas")
         let unassigned = item(text: "Unassigned")
         let store = ClipboardStore(
-            settings: AppSettings(),
+            settings: isolatedAppSettings(),
             sourceTracker: CopySourceTracker(),
             initialItems: [assigned, otherAssigned, unassigned],
+            pasteboard: NSPasteboard.withUniqueName(),
             persistItems: { capture.calls.append($0) }
         )
         store.selectedBoardID = Pinboard.custom("Work").id
@@ -350,6 +353,7 @@ struct ClipboardStoreSelectionTests {
             settings: settings,
             sourceTracker: CopySourceTracker(),
             initialItems: [assigned],
+            pasteboard: NSPasteboard.withUniqueName(),
             persistItems: { _ in }
         )
         let itemsBefore = store.items
@@ -364,9 +368,10 @@ struct ClipboardStoreSelectionTests {
 
     private func store(items: [ClipboardItem]) -> ClipboardStore {
         ClipboardStore(
-            settings: AppSettings(),
+            settings: isolatedAppSettings(),
             sourceTracker: CopySourceTracker(),
             initialItems: items,
+            pasteboard: NSPasteboard.withUniqueName(),
             persistItems: { _ in }
         )
     }

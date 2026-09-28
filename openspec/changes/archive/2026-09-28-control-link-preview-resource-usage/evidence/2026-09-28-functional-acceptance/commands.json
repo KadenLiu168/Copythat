@@ -1,0 +1,18 @@
+{
+  "cwd": "/Users/kaden/Copythat",
+  "sourceFingerprint": "6df3cf16f7c8553f30ae99b36e4fad8bb0ddf0c14fb10c6f087817a1afc37139",
+  "commands": {
+    "targeted": "swift test -Xswiftc -F -Xswiftc /Applications/Xcode.app/Contents/Developer/Library/Frameworks --filter 'LinkPreview|StorePanelWiring|ClipboardStorePersistence|ClipboardStorePasteboard|PasteDecision|ClipboardPastePerformer|PasteTarget|PanelFrame'",
+    "preview-live": "bash script/verify/preview_live.sh run --port 18765 --output .build/preview-functional-acceptance",
+    "verify-all": "PATH=/opt/homebrew/Caskroom/miniconda/base/bin:$PATH ./script/verify_all.sh",
+    "openspec-validate": "openspec validate control-link-preview-resource-usage --strict",
+    "negative-control": "Temporarily replace initialItems: try reader.loadItems() with initialItems: [original]; swift test -Xswiftc -F -Xswiftc /Applications/Xcode.app/Contents/Developer/Library/Frameworks --filter previewSavedToDiskRestoresIntoNewStoreAndRetainsURLBehavior; restore original test source before final verification"
+  },
+  "results": {
+    "targeted": "passed: 96 tests / 15 suites",
+    "preview-live": "passed: 8 scenarios, all assertions true",
+    "verify-all": "passed: 241 tests / 40 suites, build, packaging/icons, source timing, isolated startup/portable/panel, bundle/signature",
+    "openspec-validate": "passed",
+    "negative-control": "expected failure: exit 1, title/image assertions; final correct source passes"
+  }
+}

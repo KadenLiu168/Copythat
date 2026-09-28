@@ -9,6 +9,7 @@ struct ClipboardDiagnostics {
     private let defaults: UserDefaults
     private let logger: Logger
     private let eventSink: ((SourceTimingEvent) -> Void)?
+    private let linkPreviewEventSink: ((LinkPreviewEvent) -> Void)?
 
     init(
         defaults: UserDefaults = .standard,
@@ -16,11 +17,45 @@ struct ClipboardDiagnostics {
             subsystem: Bundle.main.bundleIdentifier ?? "local.copythat.clipboard",
             category: ClipboardDiagnostics.category
         ),
-        eventSink: ((SourceTimingEvent) -> Void)? = nil
+        eventSink: ((SourceTimingEvent) -> Void)? = nil,
+        linkPreviewEventSink: ((LinkPreviewEvent) -> Void)? = nil
     ) {
         self.defaults = defaults
         self.logger = logger
         self.eventSink = eventSink
+        self.linkPreviewEventSink = linkPreviewEventSink
+    }
+
+    /// Emits a link preview outcome event. Records identifiers and outcome
+    /// kinds only - never URLs or clipboard payloads (D7 payload-safety).
+    func logLinkPreview(
+        itemID: UUID,
+        outcome: LinkPreviewOutcome,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        guard isEnabled else { return }
+        let event = LinkPreviewEvent(
+            event: "link_preview",
+            uptime: uptime,
+            itemID: itemID.uuidString,
+            outcome: outcome.rawValue
+        )
+        if let linkPreviewEventSink {
+            linkPreviewEventSink(event)
+            return
+        }
+        guard let message = try? event.jsonLine() else { return }
+        logger.info("link_preview \(message, privacy: .public)")
+    }
+
+    private func emitLinkPreview(_ event: LinkPreviewEvent) {
+        guard isEnabled else { return }
+        if let linkPreviewEventSink {
+            linkPreviewEventSink(event)
+            return
+        }
+        guard let message = try? event.jsonLine() else { return }
+        logger.info("link_preview \(message, privacy: .public)")
     }
 
     var isEnabled: Bool {
@@ -157,6 +192,34 @@ struct ClipboardDiagnostics {
 }
 
 extension ClipboardDiagnostics {
+    struct LinkPreviewEvent: Codable, Equatable {
+        let event: String
+        let uptime: TimeInterval
+        let itemID: String
+        let outcome: String
+
+        func jsonLine() throws -> String {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            return String(decoding: try encoder.encode(self), as: UTF8.self)
+        }
+    }
+
+    enum LinkPreviewOutcome: String {
+        case metadataImage = "metadata-image"
+        case metadataTitleOnly = "metadata-title-only"
+        case metadataEmpty = "metadata-empty"
+        case metadataFailure = "metadata-failure"
+        case metadataCancelled = "metadata-cancelled"
+        case panelOpened = "panel-opened"
+        case panelClosed = "panel-closed"
+        case snapshotStarted = "snapshot-started"
+        case snapshotApplied = "snapshot-applied"
+        case snapshotCacheApplied = "snapshot-cache-applied"
+        case snapshotFailed = "snapshot-failed"
+        case snapshotCancelled = "snapshot-cancelled"
+    }
+
     enum ShortcutOperation: String {
         case copy
         case cut
