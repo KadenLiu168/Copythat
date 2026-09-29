@@ -11,7 +11,7 @@ Copythat attributes clipboard items captured without a keyboard copy shortcut (c
 - Keyboard-shortcut attribution (Cmd+C/Cmd+X via the event tap) keeps its existing, higher priority — that path is verified correct and stays untouched.
 - Existing fallback behavior (recent foreground, system, unknown) remains for cases where no first-observed snapshot exists (e.g. the frontmost app at first observation is Copythat itself or otherwise not a source candidate).
 - When the existing default-off clipboard diagnostics mode is enabled, emit payload-free timing events for first observation, application activation, copy-shortcut observation, and source resolution so the real ordering and selected resolution slot can be audited.
-- Provide a focused verification script and preserve sanitized evidence tied to the final relevant file identities.
+- Provide a focused verification script whose live modes assert the real ordering, selected slot, and final source without retaining clipboard payloads.
 
 ## Capabilities
 
@@ -30,7 +30,7 @@ Copythat attributes clipboard items captured without a keyboard copy shortcut (c
 - `Sources/Copythat/Support/CopySourceResolution.swift` — resolution slot priority: shortcut > first-observed foreground > capture-time foreground > recent foreground > system > unknown.
 - `Sources/Copythat/Support/ClipboardDiagnostics.swift` — default-off structured metadata events for source timing and resolution decisions.
 - `Tests/CopythatTests/` — regression tests for the resolution ordering and the stability-gate snapshot hand-off.
-- `script/verify/source_attribution_timing.sh` and this Change's `evidence/` directory — deterministic live acceptance and sanitized evidence capture.
+- `script/verify/source_attribution_timing.sh` — deterministic live acceptance that reports its conclusion in the agent response.
 - No persistence format change; no UI change; no new permissions.
 
 ## Non-goals

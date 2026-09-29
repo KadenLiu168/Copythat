@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+./script/verify/openspec_artifact_hygiene.sh
+./script/verify/openspec_artifact_hygiene_test.sh
+
 ./script/verify/packaging_test.sh
 
 swift build

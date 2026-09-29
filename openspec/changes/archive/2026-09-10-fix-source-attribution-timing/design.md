@@ -83,9 +83,9 @@ Use `ProcessInfo.processInfo.systemUptime` for ordering within one run; OSLog wa
 
 ### D7: Verify live ordering and preserve evidence
 
-Add `script/verify/source_attribution_timing.sh` with a non-keyboard mode and a physical-shortcut mode. The non-keyboard mode activates Chrome, writes a unique marker through background `pbcopy`, waits for the matching first-observation event, then activates Visual Studio Code before confirmation. The shortcut mode records a user-performed physical Cmd+C and subsequent app switch. Both modes analyze captured diagnostic events by change count and assert the required event order, selected slot, and final source without writing the marker or copied content to evidence.
+Add `script/verify/source_attribution_timing.sh` with a non-keyboard mode and a physical-shortcut mode. The non-keyboard mode activates Chrome, writes a unique marker through background `pbcopy`, waits for the matching first-observation event, then activates Visual Studio Code before confirmation. The shortcut mode records a user-performed physical Cmd+C and subsequent app switch; that mode must never synthesize the copy itself (no `CGEventPost`, no AppleScript keystroke) — the runner prompts for the physical shortcut and may only drive the app switch from observing `copy_shortcut_observed`. Both modes analyze captured diagnostic events by change count and assert the required event order, selected slot, and final source without writing the marker or copied content to evidence.
 
-Preserve the final full-gate output, sanitized timing events, toolchain/command results, and SHA-256 identities of every relevant implementation/test/script file under this Change's `evidence/` directory. Evidence files are verification artifacts, not runtime application state.
+Report the acceptance conclusion in the agent response and keep the full gate output, sanitized timing events, and toolchain/command results in `.build/` or `/tmp/`; this Change keeps no `evidence/` directory (see AGENTS.md, Artifact Hygiene). Because a live result only describes the revision it ran against, re-run the analyzer and both live modes after any later change to capture, source resolution, or diagnostics.
 
 - Alternative considered: rely on screenshots and prose alone — rejected, they cannot establish event order or bind the result to the final diff.
 

@@ -190,7 +190,42 @@ Commit messages should explain:
 
 ---
 
-## 8. Agent Workflow
+## 8. Artifact Hygiene
+
+Repository documents hold durable knowledge that stays true beyond the run that
+produced it. Everything else stays out of Git.
+
+Durable, keep in the repository:
+
+* Verification procedures and acceptance criteria that must be repeated later.
+* Requirements, decisions, tradeoffs, obligations, and known limitations.
+* Operating instructions for long-lived tooling.
+
+Ephemeral, never commit:
+
+* Verification, review, and audit results, test reports, implementation
+  summaries, handoffs, command output, environment snapshots, and temporary
+  evidence.
+* Details that describe a single run only: counts, timestamps, local paths,
+  hashes, and pass claims.
+
+Rules:
+
+* Report the conclusions of a verification or review in the agent response.
+* Keep detailed evidence in `.build/` or `/tmp/`; both are ignored.
+* Route durable findings to the artifact that owns them: specs for behavior,
+  proposal/design for decisions and tradeoffs, tasks for obligations, and
+  `docs/` for long-lived procedures no spec owns.
+* Inside `openspec/changes/`, keep only the OpenSpec artifacts. A change
+  directory holds `proposal.md`, `design.md`, `tasks.md`, and
+  `specs/<capability>/spec.md`, in active changes and under `archive/` alike.
+  `./script/verify_all.sh` rejects every other `.md` or `.txt` document there.
+  Anything beyond that needs a deliberate gate and test update, never a blanket
+  notes allowance.
+
+---
+
+## 9. Agent Workflow
 
 For every task:
 
@@ -213,7 +248,7 @@ Perform adversarial review:
 
 ---
 
-## 9. Do Not
+## 10. Do Not
 
 Do not:
 
@@ -226,7 +261,7 @@ Do not:
 
 ---
 
-## 10. Common Commands
+## 11. Common Commands
 
 Build:
 

@@ -78,7 +78,7 @@ Each scenario has `passed`, `failed`, `blocked`, or `not-covered`, evidence leve
 
 Record source revision plus dirty-source snapshot digest, candidate binary digest, build configuration, OS/application versions, selected timing constants, and input mechanism. Do not store raw diffs or raw clipboard payloads as provenance. Provide a concise human report and schema-validated JSON.
 
-Include a mapping to original 5.2/5.3/5.5, listing residual obligations; never edit original checkboxes automatically. Implementing a blocked reporting path is testable with fixtures, but does not count as successful live scenario delivery. This Change's handoff must state which unattended scenarios actually ran and which remain blocked.
+Include a mapping to original 5.2/5.3/5.5, listing residual obligations; never edit original checkboxes automatically. Implementing a blocked reporting path is testable with fixtures, but does not count as successful live scenario delivery. The delivery summary reports in the agent response which unattended scenarios actually ran and which remain blocked, and records only durable coverage boundaries in `docs/clipboard-live-verification.md`.
 
 ## Risks / Trade-offs
 

@@ -23,7 +23,7 @@
 
 ## 5. Final verification
 
-- [x] 5.1 Run `swift build` and `./script/verify_all.sh` after the final relevant code/test/script change. Save the complete gate output and exact exit status under `openspec/changes/fix-source-attribution-timing/evidence/`, together with the command, toolchain, changed-file inventory, and SHA-256 identities of the relevant files.
-- [x] 5.2 Run the live non-keyboard acceptance: Chrome remains frontmost through `pasteboard_observed`, Visual Studio Code activates before `source_resolved`, and the resolution event reports `firstObservedForeground` with `Google Chrome`. Preserve the sanitized correlated events and analyzer result; do not preserve the marker or clipboard payload.
-- [x] 5.3 Run the physical Cmd+C regression: the event tap records a real Chrome copy shortcut before the app switch, and `source_resolved` reports `shortcut` with `Google Chrome`. Preserve the sanitized correlated events and analyzer result without clipboard payloads.
-- [x] 5.4 Run target strict OpenSpec validation and `git diff --check`, confirm the evidence identities still match the final relevant files, and summarize exact results in `evidence/verification.md`.
+- [x] 5.1 Run `swift build` and `./script/verify_all.sh` after the final relevant code/test/script change, and report the outcome in the agent response; keep the complete gate output in `.build/` or `/tmp/`, never in this Change.
+- [x] 5.2 Run the live non-keyboard acceptance: Chrome remains frontmost through `pasteboard_observed`, Visual Studio Code activates before `source_resolved`, and the resolution event reports `firstObservedForeground` with `Google Chrome`. Report the sanitized analyzer conclusion in the agent response and keep the correlated events in `.build/` or `/tmp/`; never retain the marker or clipboard payload.
+- [x] 5.3 Run the physical Cmd+C regression: the event tap records a real Chrome copy shortcut before the app switch, and `source_resolved` reports `shortcut` with `Google Chrome`. Report the sanitized analyzer conclusion in the agent response and keep the correlated events in `.build/` or `/tmp/`; never retain the clipboard payload.
+- [x] 5.4 Run target strict OpenSpec validation and `git diff --check`, and report both results in the agent response.

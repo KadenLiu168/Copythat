@@ -9,6 +9,7 @@ context: |
   UI constraints: keep UI native to macOS. Prefer system materials, semantic colors, system accent color, and compact controls over fixed custom palettes.
   Verification: run swift build and ./script/verify_all.sh for implementation changes. Manual checks are still required for Accessibility access, global shortcut registration, Launch at login, panel UI, search, pinboards, horizontal scrolling, paste flow, and physical multi-display behavior.
   Terminology: preserve real domain terms such as paste, pasteboard, copy, cut, and source. Do not mechanically rename them away.
+  Artifact hygiene: keep only durable knowledge in the repository. Report verification and review conclusions in the agent response and keep detailed execution evidence in .build/ or /tmp/. Inside openspec/changes/, only <change>/proposal.md, <change>/design.md, <change>/tasks.md, and <change>/specs/<capability>/spec.md are allowed, in active changes and under archive/ alike; script/verify_all.sh enforces this. The shared rule that applies to every stage, including execution, review, and archive, lives in AGENTS.md; do not assume each stage injects this context.
 
 rules:
   proposal:

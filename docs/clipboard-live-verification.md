@@ -18,7 +18,9 @@ session once, from an unlocked graphical login:
 2. Grant **Automation** permission for *System Events* to the host terminal so
    keystroke delivery works without prompts.
 3. Install **Google Chrome** (copy fixtures) and **Visual Studio Code** (paste
-   target). Both are verified by preflight.
+   target). Both are verified by preflight. Keep their windows unminimized: a
+   minimized Chrome window is invisible to Accessibility on current macOS
+   builds and cannot be activated, which blocks the Chrome scenarios.
 4. Run in a disposable test account when possible. The runner isolates the
    candidate's history and settings (per-run defaults suite
    `local.copythat.live-verify` + temp persistence), but real applications
@@ -90,6 +92,12 @@ prerequisites/coverage (blocked/not-covered).
   stays with the physical Cmd+Shift+4 flow (original 5.5). When region
   capture is unavailable, the scenario reports blocked with the exact cause;
   full-screen capture is refused to preserve the fixture-only boundary.
+- `restore_paste` and `restore_paste_negative` drive the store's restore path
+  and the driver's own Command-V; they do **not** run
+  `ClipboardPastePerformer`. Panel-triggered paste, target activation, the
+  350 ms fallback, and immediate panel dismissal stay covered by
+  `ClipboardPastePerformerTests` and the manual panel smoke test, never by
+  this runner.
 - `originalTaskMapping` in every report maps results back to original
   5.2/5.3/5.5 and lists residual obligations. The runner never edits the
   original change's checkboxes.
