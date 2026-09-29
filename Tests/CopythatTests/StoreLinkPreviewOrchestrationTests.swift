@@ -108,7 +108,7 @@ struct StoreLinkPreviewOrchestrationTests {
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
             fetchLinkMetadata: { _ in
-                LinkPreviewMetadata(title: "Example", imageData: nil)
+                LinkPreviewMetadata(title: "Example", image: nil)
             },
             fetchLinkSnapshot: { url in
                 counter.begin("snapshot:\(url.absoluteString)")

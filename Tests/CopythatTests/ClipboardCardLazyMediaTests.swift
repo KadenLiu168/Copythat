@@ -383,6 +383,10 @@ extension ClipboardCardLazyMediaTests {
             authorizationGeneration: store.panelAuthorizationGeneration,
             mediaState: state
         )
+        // Let the reference replacement supersede the pending request before the
+        // superseded read is released: the loader serializes reads, so which of
+        // the two wins an update cycle must not decide the outcome.
+        await fixture.settle()
         fixture.reader.releaseFirstRead()
         await fixture.waitUntil { state.image != nil }
 
@@ -672,7 +676,7 @@ extension ClipboardCardLazyMediaTests {
         await fixture.waitUntil { state.image != nil }
         #expect(store.items == originalItems)
         #expect(store.items.first?.imageData == nil)
-        #expect(store.items.first?.persistedImageBlobID == blobID)
+        #expect(store.items.first?.imageBlobID == blobID)
         #expect(store.selectedID == originalSelection)
         #expect(store.linkMetadataStates.isEmpty)
         #expect(fixture.saveCount() == 0)
@@ -829,7 +833,7 @@ private final class CardMediaFixture {
             textValue: nil,
             fileURLs: [],
             imageData: inlineData,
-            persistedImageBlobID: blobID
+            imageBlobID: blobID
         )
     }
 
@@ -883,7 +887,7 @@ private final class CardMediaFixture {
             imageData: nil,
             linkTitle: "Example",
             linkImageData: nil,
-            persistedLinkImageBlobID: blobID
+            linkImageBlobID: blobID
         )
     }
 

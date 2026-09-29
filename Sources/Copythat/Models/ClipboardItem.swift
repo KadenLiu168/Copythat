@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import Foundation
 
 enum ClipboardKind: String, Codable, CaseIterable {
@@ -34,6 +33,9 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     let preview: String
     let sourceApp: String
     let sourceAppIconData: Data?
+    /// Content address of the bytes backing `sourceAppIconData`, established
+    /// once when the icon is prepared and forwarded with it afterwards.
+    let sourceAppIconBlobID: String?
     let createdAt: Date
     var isPinned: Bool
     var pinboardName: String?
@@ -42,11 +44,11 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     let imageData: Data?
     let linkTitle: String?
     let linkImageData: Data?
-    /// Content address of the persisted image blob backing `imageData`.
-    /// Retained while V2 history restores heavy media without reading it, so
-    /// identity and persistence survive without resident bytes.
-    let persistedImageBlobID: String?
-    let persistedLinkImageBlobID: String?
+    /// Content address of the bytes backing `imageData`. Retained while V2
+    /// history restores heavy media without reading it, so identity and
+    /// persistence survive without resident bytes.
+    let imageBlobID: String?
+    let linkImageBlobID: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -72,16 +74,17 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         preview: String,
         sourceApp: String,
         sourceAppIconData: Data?,
+        sourceAppIconBlobID: String? = nil,
         createdAt: Date,
         isPinned: Bool,
         pinboardName: String?,
         textValue: String?,
         fileURLs: [URL],
         imageData: Data?,
+        imageBlobID: String? = nil,
         linkTitle: String? = nil,
         linkImageData: Data? = nil,
-        persistedImageBlobID: String? = nil,
-        persistedLinkImageBlobID: String? = nil
+        linkImageBlobID: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -89,6 +92,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         self.preview = preview
         self.sourceApp = sourceApp
         self.sourceAppIconData = sourceAppIconData
+        self.sourceAppIconBlobID = Self.mediaBlobID(known: sourceAppIconBlobID, data: sourceAppIconData)
         self.createdAt = createdAt
         self.isPinned = isPinned
         self.pinboardName = pinboardName
@@ -97,8 +101,16 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         self.imageData = imageData
         self.linkTitle = linkTitle
         self.linkImageData = linkImageData
-        self.persistedImageBlobID = persistedImageBlobID
-        self.persistedLinkImageBlobID = persistedLinkImageBlobID
+        self.imageBlobID = Self.mediaBlobID(known: imageBlobID, data: imageData)
+        self.linkImageBlobID = Self.mediaBlobID(known: linkImageBlobID, data: linkImageData)
+    }
+
+    /// Resident bytes imply an address. Raw construction establishes that address
+    /// once here instead of deferring hashing to save, while a prepared payload
+    /// forwards the identity its producer already computed.
+    private static func mediaBlobID(known: String?, data: Data?) -> String? {
+        guard let data else { return known }
+        return known ?? PreparedMedia(hashing: data).id
     }
 
     init(from decoder: Decoder) throws {
@@ -114,11 +126,16 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         pinboardName = try container.decodeIfPresent(String.self, forKey: .pinboardName)
         textValue = try container.decodeIfPresent(String.self, forKey: .textValue)
         fileURLs = try container.decodeIfPresent([URL].self, forKey: .fileURLs) ?? []
-        imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
+        let decodedImageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
+        let decodedLinkImageData = try container.decodeIfPresent(Data.self, forKey: .linkImageData)
+        imageData = decodedImageData
         linkTitle = try container.decodeIfPresent(String.self, forKey: .linkTitle)
-        linkImageData = try container.decodeIfPresent(Data.self, forKey: .linkImageData)
-        persistedImageBlobID = nil
-        persistedLinkImageBlobID = nil
+        linkImageData = decodedLinkImageData
+        // Legacy inline media carries no address, so decoding establishes each
+        // payload's identity once before any normal save sees it.
+        imageBlobID = Self.mediaBlobID(known: nil, data: decodedImageData)
+        linkImageBlobID = Self.mediaBlobID(known: nil, data: decodedLinkImageData)
+        sourceAppIconBlobID = Self.mediaBlobID(known: nil, data: sourceAppIconData)
     }
 
     var searchText: String {
@@ -141,14 +158,16 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
 
     /// Whether an image payload exists, whether resident or still on disk.
     var hasImagePayload: Bool {
-        imageData != nil || persistedImageBlobID != nil
+        imageBlobID != nil
     }
 
     /// Whether a link-preview image payload exists, resident or still on disk.
     var hasLinkImagePayload: Bool {
-        linkImageData != nil || persistedLinkImageBlobID != nil
+        linkImageBlobID != nil
     }
 
+    /// Resident and restored images share one key: the address of their stored
+    /// bytes. Comparing identities therefore needs no resident bytes at all.
     var contentKey: String {
         switch kind {
         case .text, .url:
@@ -156,19 +175,18 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         case .file:
             return "file:\(fileURLs.map(\.path).joined(separator: "|"))"
         case .image:
-            if let imageData {
-                return "image:\(imageData.stableDigest)"
-            }
-            if let persistedImageBlobID {
-                return "image:\(persistedImageBlobID)"
-            }
-            return "image:empty"
+            guard let imageBlobID else { return "image:empty" }
+            return "image:\(imageBlobID)"
         }
     }
 
     var storageOptimized: ClipboardItem {
-        let optimizedImageData = imageData == nil ? nil : image?.pngData(maxPixel: 1_200)
-        let optimizedLinkImageData = linkImageData == nil ? nil : linkImage?.pngData(maxPixel: 640)
+        let optimizedImage = storageOptimizedMedia(imageData: imageData, blobID: imageBlobID, maxPixel: 1_200)
+        let optimizedLinkImage = storageOptimizedMedia(
+            imageData: linkImageData,
+            blobID: linkImageBlobID,
+            maxPixel: 640
+        )
         return ClipboardItem(
             id: id,
             kind: kind,
@@ -176,28 +194,23 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
             preview: preview,
             sourceApp: sourceApp,
             sourceAppIconData: sourceAppIconData,
+            sourceAppIconBlobID: sourceAppIconBlobID,
             createdAt: createdAt,
             isPinned: isPinned,
             pinboardName: pinboardName,
             textValue: textValue,
             fileURLs: fileURLs,
-            imageData: optimizedImageData,
+            imageData: optimizedImage.data,
+            imageBlobID: optimizedImage.blobID,
             linkTitle: linkTitle,
-            linkImageData: optimizedLinkImageData,
-            persistedImageBlobID: persistedReference(
-                persistedImageBlobID,
-                original: imageData,
-                optimized: optimizedImageData
-            ),
-            persistedLinkImageBlobID: persistedReference(
-                persistedLinkImageBlobID,
-                original: linkImageData,
-                optimized: optimizedLinkImageData
-            )
+            linkImageData: optimizedLinkImage.data,
+            linkImageBlobID: optimizedLinkImage.blobID
         )
     }
 
-    func withLinkPreview(title: String?, linkImageData: Data?) -> ClipboardItem {
+    /// Applies an already finalized preview payload, which carries its own
+    /// address; passing nil keeps the current title and preview unchanged.
+    func withLinkPreview(title: String?, linkImage: PreparedMedia?) -> ClipboardItem {
         ClipboardItem(
             id: id,
             kind: kind,
@@ -205,31 +218,31 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
             preview: preview,
             sourceApp: sourceApp,
             sourceAppIconData: sourceAppIconData,
+            sourceAppIconBlobID: sourceAppIconBlobID,
             createdAt: createdAt,
             isPinned: isPinned,
             pinboardName: pinboardName,
             textValue: textValue,
             fileURLs: fileURLs,
             imageData: imageData,
+            imageBlobID: imageBlobID,
             linkTitle: title,
-            linkImageData: linkImageData ?? self.linkImageData,
-            persistedImageBlobID: persistedImageBlobID,
-            persistedLinkImageBlobID: linkImageData == nil ? persistedLinkImageBlobID : nil
+            linkImageData: linkImage?.data ?? linkImageData,
+            linkImageBlobID: linkImage?.id ?? linkImageBlobID
         )
     }
 
-    /// A reference stays valid only while the bytes it addresses are unchanged.
-    private func persistedReference(_ blobID: String?, original: Data?, optimized: Data?) -> String? {
-        guard let original else { return blobID }
-        guard let optimized, optimized == original else { return nil }
-        return blobID
-    }
-}
-
-private extension Data {
-    var stableDigest: String {
-        SHA256.hash(data: self)
-            .map { String(format: "%02x", $0) }
-            .joined()
+    /// Storage optimization for raw or unbounded media. Unchanged bytes keep
+    /// their address, changed output receives a new one, and a conversion that
+    /// yields no payload clears the pair. Reference-only media has no bytes to
+    /// convert and keeps its reference.
+    private func storageOptimizedMedia(
+        imageData: Data?,
+        blobID: String?,
+        maxPixel: CGFloat
+    ) -> (data: Data?, blobID: String?) {
+        guard let imageData else { return (nil, blobID) }
+        guard let optimized = NSImage(data: imageData)?.pngData(maxPixel: maxPixel) else { return (nil, nil) }
+        return optimized == imageData ? (optimized, blobID) : (optimized, nil)
     }
 }

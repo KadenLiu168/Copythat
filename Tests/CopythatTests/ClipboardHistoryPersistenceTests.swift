@@ -13,7 +13,7 @@ private enum PersistenceTestFailure: Error {
 }
 
 struct ClipboardHistoryPersistenceTests {
-    @Test func saveRepairsAnExistingBlobWhoseContentsDoNotMatchItsHash() throws {
+    @Test func savingResidentMediaHashesAndReadsNoPayload() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ClipboardHistoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)
         let defaultsName = "ClipboardHistoryPersistenceTests.\(UUID().uuidString)"
@@ -23,37 +23,185 @@ struct ClipboardHistoryPersistenceTests {
             defaults.removePersistentDomain(forName: defaultsName)
         }
 
-        var blobWriteCount = 0
-        let persistence = ClipboardHistoryPersistence(
+        let counters = MediaOperationCounters()
+        let persistence = counters.makePersistence(directoryURL: directory, userDefaults: defaults)
+        let items = [
+            persistenceTestItem(
+                id: "00000000-0000-0000-0000-0000000000a1",
+                sourceIcon: Data(repeating: 0x61, count: 96),
+                image: Data(repeating: 0x62, count: 1_024)
+            ),
+            persistenceTestItem(
+                id: "00000000-0000-0000-0000-0000000000a2",
+                sourceIcon: Data(repeating: 0x61, count: 96),
+                linkImage: Data(repeating: 0x63, count: 2_048)
+            )
+        ]
+        try persistence.save(items)
+
+        // The second save sees every payload resident and every blob present.
+        counters.reset()
+        try await counters.measure { try persistence.save(items) }
+
+        #expect(counters.mediaHashCount == 0)
+        #expect(counters.blobReadCount == 0)
+        #expect(counters.blobWriteCount == 0)
+        #expect(counters.manifestWriteCount == 1)
+        AcceptanceMetrics.record(
+            scenario: "metadata-save",
+            metric: "mediaHashCount",
+            expected: "0",
+            observed: "\(counters.mediaHashCount)"
+        )
+        AcceptanceMetrics.record(
+            scenario: "metadata-save",
+            metric: "blobReadCountDuringSave",
+            expected: "0",
+            observed: "\(counters.blobReadCount)"
+        )
+    }
+
+    @Test func missingResidentBlobIsWrittenAtItsKnownAddressWithoutRehashing() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClipboardHistoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "ClipboardHistoryPersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let counters = MediaOperationCounters()
+        let persistence = counters.makePersistence(directoryURL: directory, userDefaults: defaults)
+        let imageBytes = Data(repeating: 0x64, count: 512)
+        let item = persistenceTestItem(
+            id: "00000000-0000-0000-0000-0000000000a3",
+            sourceIcon: nil,
+            image: imageBytes
+        )
+        try persistence.save([item])
+        let mediaDirectory = directory.appendingPathComponent("history-media", isDirectory: true)
+        let blobURL = mediaDirectory.appendingPathComponent("\(sha256Hex(imageBytes)).blob")
+        try FileManager.default.removeItem(at: blobURL)
+
+        counters.reset()
+        try await counters.measure { try persistence.save([item]) }
+
+        #expect(counters.mediaHashCount == 0)
+        #expect(counters.blobReadCount == 0)
+        #expect(counters.blobWriteCount == 1)
+        #expect(counters.manifestWriteCount == 1)
+        #expect(try Data(contentsOf: blobURL) == imageBytes)
+        #expect(try persistence.loadItems().first?.imageBlobID == sha256Hex(imageBytes))
+    }
+
+    @Test func retryAfterAFailedBlobWriteReusesIdentitiesWithoutRehashing() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClipboardHistoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "ClipboardHistoryPersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let counters = MediaOperationCounters()
+        var failBlobWrites = true
+        let persistence = counters.makePersistence(
             directoryURL: directory,
             userDefaults: defaults,
-            writeData: { data, url in
-                if url.pathExtension == "blob" {
-                    blobWriteCount += 1
-                }
-                try data.write(to: url, options: [.atomic])
-            }
+            failWrite: { $0.pathExtension == "blob" && failBlobWrites }
         )
+        let imageBytes = Data(repeating: 0x65, count: 768)
+        let item = persistenceTestItem(
+            id: "00000000-0000-0000-0000-0000000000a4",
+            sourceIcon: nil,
+            image: imageBytes
+        )
+
+        counters.reset()
+        var blobSaveFailed = false
+        try await counters.measure {
+            do {
+                try persistence.save([item])
+            } catch {
+                blobSaveFailed = true
+            }
+        }
+        #expect(blobSaveFailed)
+        #expect(counters.mediaHashCount == 0)
+        #expect(counters.manifestWriteCount == 0)
+        #expect(!FileManager.default.fileExists(atPath: persistence.historyURL.path))
+
+        failBlobWrites = false
+        counters.reset()
+        try await counters.measure { try persistence.save([item]) }
+
+        #expect(counters.mediaHashCount == 0)
+        #expect(counters.blobWriteCount == 1)
+        #expect(counters.manifestWriteCount == 1)
+        let mediaDirectory = directory.appendingPathComponent("history-media", isDirectory: true)
+        #expect(
+            try Data(contentsOf: mediaDirectory.appendingPathComponent("\(sha256Hex(imageBytes)).blob")) == imageBytes
+        )
+        #expect(try persistence.loadItems().first?.imageBlobID == sha256Hex(imageBytes))
+    }
+
+    @Test func metadataSaveNeitherReadsNorRepairsACorruptBlob() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClipboardHistoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "ClipboardHistoryPersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let counters = MediaOperationCounters()
+        let persistence = counters.makePersistence(directoryURL: directory, userDefaults: defaults)
         let media = Data([0x21, 0x22, 0x23])
         let item = persistenceTestItem(
             id: "00000000-0000-0000-0000-000000000038",
             sourceIcon: nil,
             image: media
         )
-
         try persistence.save([item])
         let mediaDirectory = directory.appendingPathComponent("history-media", isDirectory: true)
         let blobURL = try #require(
             FileManager.default.contentsOfDirectory(at: mediaDirectory, includingPropertiesForKeys: nil).first
         )
         try Data([0xff]).write(to: blobURL, options: [.atomic])
-        #expect(try Data(contentsOf: blobURL) == Data([0xff]))
+        let corrupted = try Data(contentsOf: blobURL)
 
-        try persistence.save([item])
+        // A metadata save keeps the reference: it neither reads nor hashes nor
+        // rewrites the payload it cannot verify.
+        counters.reset()
+        try await counters.measure { try persistence.save([item]) }
 
-        #expect(blobWriteCount == 2)
-        #expect(try Data(contentsOf: blobURL) == media)
-        try expectLazyRestore(try persistence.loadItems(), equalsEager: [item], persistence: persistence)
+        #expect(counters.mediaHashCount == 0)
+        #expect(counters.blobReadCount == 0)
+        #expect(counters.blobWriteCount == 0)
+        #expect(counters.manifestWriteCount == 1)
+        #expect(try Data(contentsOf: blobURL) == corrupted)
+
+        // The corruption surfaces only when the bytes are actually needed, and
+        // they are never released.
+        counters.reset()
+        let blobID = try #require(try persistence.loadItems().first?.imageBlobID)
+        var releasedBytes: Data?
+        var readFailed = false
+        try await counters.measure {
+            do {
+                releasedBytes = try persistence.blobStore.read(blobID: blobID)
+            } catch {
+                readFailed = true
+            }
+        }
+
+        #expect(readFailed)
+        #expect(releasedBytes == nil)
+        #expect(counters.integrityHashCount == 1)
+        #expect(counters.identityHashCount == 0)
     }
 
     @Test func failedVersionOneMigrationKeepsTheLegacyFileReadable() throws {
@@ -237,7 +385,7 @@ struct ClipboardHistoryPersistenceTests {
         )
         let updatedItem = committedItem.withLinkPreview(
             title: "Preview",
-            linkImageData: Data(repeating: 0x43, count: 4_096)
+            linkImage: PreparedMedia(hashing: Data(repeating: 0x43, count: 4_096))
         )
 
         failBlobWrite = true
@@ -336,8 +484,8 @@ struct ClipboardHistoryPersistenceTests {
         let expected = persistenceTestItem(
             id: "00000000-0000-0000-0000-000000000044",
             sourceIcon: nil,
-            persistedImageBlobID: sha256Hex(imageBytes),
-            persistedLinkImageBlobID: sha256Hex(linkImageBytes)
+            imageBlobID: sha256Hex(imageBytes),
+            linkImageBlobID: sha256Hex(linkImageBytes)
         )
         #expect(loaded == [expected])
         #expect(loaded[0].hasImagePayload)
@@ -470,6 +618,112 @@ struct ClipboardHistoryPersistenceTests {
         #expect(try Data(contentsOf: persistence.historyURL) == rawData)
     }
 
+    @Test func restoringV2HistoryHashesNoIdentityAndVerifiesOnlySourceIcons() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClipboardHistoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "ClipboardHistoryPersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let counters = MediaOperationCounters()
+        let persistence = counters.makePersistence(directoryURL: directory, userDefaults: defaults)
+        let icon = Data(repeating: 0x51, count: 128)
+        let imageBytes = Data(repeating: 0x52, count: 512)
+        let linkImageBytes = Data(repeating: 0x53, count: 256)
+        try persistence.save([
+            persistenceTestItem(
+                id: "00000000-0000-0000-0000-000000000051",
+                sourceIcon: icon,
+                image: imageBytes
+            ),
+            persistenceTestItem(
+                id: "00000000-0000-0000-0000-000000000052",
+                sourceIcon: icon,
+                linkImage: linkImageBytes
+            )
+        ])
+
+        counters.reset()
+        let restored = try await counters.measure { try persistence.loadItems() }
+
+        #expect(restored.count == 2)
+        #expect(restored.allSatisfy { $0.sourceAppIconBlobID == sha256Hex(icon) })
+        #expect(restored.map(\.imageBlobID) == [sha256Hex(imageBytes), nil])
+        #expect(restored.map(\.linkImageBlobID) == [nil, sha256Hex(linkImageBytes)])
+        #expect(restored.allSatisfy { $0.imageData == nil && $0.linkImageData == nil })
+        // Manifest addresses are forwarded as they are: no identity is
+        // recomputed, and the only payload read is the shared icon, verified
+        // once and reused for the second item.
+        #expect(counters.identityHashCount == 0)
+        #expect(counters.integrityHashCount == 1)
+        #expect(counters.blobReadCount == 1)
+        AcceptanceMetrics.record(
+            scenario: "history-restore",
+            metric: "identityHashesOnV2Restore",
+            expected: "0",
+            observed: "\(counters.identityHashCount)"
+        )
+        AcceptanceMetrics.record(
+            scenario: "history-restore",
+            metric: "iconVerificationHashesOnV2Restore",
+            expected: "1",
+            observed: "\(counters.integrityHashCount)"
+        )
+    }
+
+    @Test func legacyInlineMediaEstablishesIdentityAtDecodeAndReusesItOnSave() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClipboardHistoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "ClipboardHistoryPersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let counters = MediaOperationCounters()
+        let persistence = counters.makePersistence(directoryURL: directory, userDefaults: defaults)
+        let icon = Data(repeating: 0x54, count: 96)
+        let imageBytes = Data(repeating: 0x55, count: 320)
+        let linkImageBytes = Data(repeating: 0x56, count: 192)
+        let legacyItem = persistenceTestItem(
+            id: "00000000-0000-0000-0000-000000000053",
+            sourceIcon: icon,
+            image: imageBytes,
+            linkImage: linkImageBytes
+        )
+        let legacyFile = try JSONEncoder().encode(LegacyHistoryFixture(version: 1, items: [legacyItem]))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try legacyFile.write(to: persistence.historyURL)
+
+        counters.reset()
+        let decoded = try await counters.measure { try persistence.loadItems() }
+
+        let item = try #require(decoded.first)
+        #expect(item.sourceAppIconBlobID == sha256Hex(icon))
+        #expect(item.imageBlobID == sha256Hex(imageBytes))
+        #expect(item.linkImageBlobID == sha256Hex(linkImageBytes))
+        // Every inline legacy payload receives its address exactly once, here.
+        #expect(counters.identityHashCount == 3)
+
+        counters.reset()
+        try await counters.measure { try persistence.save(decoded) }
+
+        // The established identities carry the migration: no media is hashed or
+        // read again, and each payload is written once at its known address.
+        #expect(counters.mediaHashCount == 0)
+        #expect(counters.blobReadCount == 0)
+        #expect(counters.blobWriteCount == 3)
+        #expect(counters.manifestWriteCount == 1)
+        let reloaded = try persistence.loadItems()
+        #expect(reloaded.map(\.imageBlobID) == [sha256Hex(imageBytes)])
+        #expect(reloaded.map(\.linkImageBlobID) == [sha256Hex(linkImageBytes)])
+        #expect(reloaded.map(\.sourceAppIconBlobID) == [sha256Hex(icon)])
+    }
+
     @Test func legacyPreferencesRemainAvailableUntilSuccessfulSave() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ClipboardHistoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)
@@ -599,17 +853,17 @@ struct ClipboardHistoryPersistenceTests {
             persistenceTestItem(
                 id: "00000000-0000-0000-0000-000000000071",
                 sourceIcon: sharedIcon,
-                persistedImageBlobID: sha256Hex(imageBytes)
+                imageBlobID: sha256Hex(imageBytes)
             ),
             persistenceTestItem(
                 id: "00000000-0000-0000-0000-000000000072",
                 sourceIcon: sharedIcon,
-                persistedLinkImageBlobID: sha256Hex(linkImageBytes)
+                linkImageBlobID: sha256Hex(linkImageBytes)
             ),
             persistenceTestItem(
                 id: "00000000-0000-0000-0000-000000000073",
                 sourceIcon: nil,
-                persistedImageBlobID: sha256Hex(secondImageBytes)
+                imageBlobID: sha256Hex(secondImageBytes)
             )
         ]
         #expect(loaded == expectedLazy)
@@ -636,11 +890,11 @@ struct ClipboardHistoryPersistenceTests {
             scenario: "history-restore",
             metric: "restoredItemsWithRetainedReferences",
             expected: "3",
-            observed: "\(loaded.filter { $0.persistedImageBlobID != nil || $0.persistedLinkImageBlobID != nil }.count)"
+            observed: "\(loaded.filter { $0.imageBlobID != nil || $0.linkImageBlobID != nil }.count)"
         )
     }
 
-    @Test func savingUnloadedReferencesReadsAndHashesNoHeavyMedia() throws {
+    @Test func savingUnloadedReferencesReadsAndHashesNoHeavyMedia() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ClipboardHistoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)
         let defaultsName = "ClipboardHistoryPersistenceTests.\(UUID().uuidString)"
@@ -650,6 +904,7 @@ struct ClipboardHistoryPersistenceTests {
             defaults.removePersistentDomain(forName: defaultsName)
         }
 
+        let counters = MediaOperationCounters()
         var reads: [String] = []
         let persistence = ClipboardHistoryPersistence(
             directoryURL: directory,
@@ -657,6 +912,10 @@ struct ClipboardHistoryPersistenceTests {
             readData: { url in
                 reads.append(url.lastPathComponent)
                 return try Data(contentsOf: url)
+            },
+            writeData: { data, url in
+                try data.write(to: url, options: [.atomic])
+                counters.record(write: url)
             }
         )
         let imageBytes = Data(repeating: 0x61, count: 1_024)
@@ -682,12 +941,17 @@ struct ClipboardHistoryPersistenceTests {
         let unloaded = persistenceTestItem(
             id: "00000000-0000-0000-0000-000000000061",
             sourceIcon: nil,
-            persistedImageBlobID: sha256Hex(imageBytes),
-            persistedLinkImageBlobID: sha256Hex(linkImageBytes)
+            imageBlobID: sha256Hex(imageBytes),
+            linkImageBlobID: sha256Hex(linkImageBytes)
         )
-        try persistence.save([unloaded])
+        counters.reset()
+        try await counters.measure { try persistence.save([unloaded]) }
 
         #expect(reads.filter { $0.hasSuffix(".blob") }.isEmpty)
+        #expect(counters.mediaHashCount == 0)
+        #expect(counters.blobReadCount == 0)
+        #expect(counters.blobWriteCount == 0)
+        #expect(counters.manifestWriteCount == 1)
         let reloaded = try persistence.loadItems()
         #expect(reloaded == [unloaded])
     }
@@ -720,11 +984,11 @@ struct ClipboardHistoryPersistenceTests {
         let committedManifest = try Data(contentsOf: persistence.historyURL)
         writes.removeAll()
 
-        for persistedImageBlobID in [String(repeating: "z", count: 64), String(repeating: "a", count: 63)] {
+        for imageBlobID in [String(repeating: "z", count: 64), String(repeating: "a", count: 63)] {
             let invalid = persistenceTestItem(
                 id: "00000000-0000-0000-0000-000000000063",
                 sourceIcon: nil,
-                persistedImageBlobID: persistedImageBlobID
+                imageBlobID: imageBlobID
             )
 
             var saveFailed = false
@@ -742,7 +1006,7 @@ struct ClipboardHistoryPersistenceTests {
         let invalidLinkReference = persistenceTestItem(
             id: "00000000-0000-0000-0000-000000000064",
             sourceIcon: nil,
-            persistedLinkImageBlobID: String(repeating: "F", count: 64)
+            linkImageBlobID: String(repeating: "F", count: 64)
         )
 
         var linkSaveFailed = false
@@ -794,8 +1058,8 @@ struct ClipboardHistoryPersistenceTests {
         #expect(after == before)
         let reloaded = try persistence.loadItems()
         #expect(reloaded.map(\.id) == restored.map(\.id))
-        #expect(reloaded.map(\.persistedImageBlobID) == restored.map(\.persistedImageBlobID))
-        #expect(reloaded.map(\.persistedLinkImageBlobID) == restored.map(\.persistedLinkImageBlobID))
+        #expect(reloaded.map(\.imageBlobID) == restored.map(\.imageBlobID))
+        #expect(reloaded.map(\.linkImageBlobID) == restored.map(\.linkImageBlobID))
     }
 
     @Test func sharedBlobIsCollectedOnlyAfterItsLastUnloadedReferenceIsRemoved() throws {
@@ -898,7 +1162,7 @@ struct ClipboardHistoryPersistenceTests {
         let existingBlobs = try blobSnapshot(in: mediaDirectory)
         let existingWriteCount = writes.count
         let preview = Data(repeating: 0x43, count: 4_096)
-        let updatedURLItem = urlItem.withLinkPreview(title: "Loaded title", linkImageData: preview)
+        let updatedURLItem = urlItem.withLinkPreview(title: "Loaded title", linkImage: PreparedMedia(hashing: preview))
         try persistence.save([updatedURLItem, otherItem])
 
         let newWrites = Array(writes.dropFirst(existingWriteCount))
@@ -1121,8 +1385,8 @@ struct ClipboardHistoryPersistenceTests {
         sourceIcon: Data?,
         image: Data? = nil,
         linkImage: Data? = nil,
-        persistedImageBlobID: String? = nil,
-        persistedLinkImageBlobID: String? = nil
+        imageBlobID: String? = nil,
+        linkImageBlobID: String? = nil
     ) -> ClipboardItem {
         ClipboardItem(
             id: UUID(uuidString: id)!,
@@ -1137,9 +1401,9 @@ struct ClipboardHistoryPersistenceTests {
             textValue: nil,
             fileURLs: [],
             imageData: image,
+            imageBlobID: imageBlobID,
             linkImageData: linkImage,
-            persistedImageBlobID: persistedImageBlobID,
-            persistedLinkImageBlobID: persistedLinkImageBlobID
+            linkImageBlobID: linkImageBlobID
         )
     }
 
@@ -1197,24 +1461,24 @@ struct ClipboardHistoryPersistenceTests {
         #expect(restored.imageData == nil, sourceLocation: sourceLocation)
         #expect(restored.linkImageData == nil, sourceLocation: sourceLocation)
         #expect(
-            restored.persistedImageBlobID == eager.imageData.map(sha256Hex),
+            restored.imageBlobID == eager.imageData.map(sha256Hex),
             sourceLocation: sourceLocation
         )
         #expect(
-            restored.persistedLinkImageBlobID == eager.linkImageData.map(sha256Hex),
+            restored.linkImageBlobID == eager.linkImageData.map(sha256Hex),
             sourceLocation: sourceLocation
         )
         #expect(restored.contentKey == eager.contentKey, sourceLocation: sourceLocation)
 
         if let expectedImage = eager.imageData {
-            let blobID = try #require(restored.persistedImageBlobID, sourceLocation: sourceLocation)
+            let blobID = try #require(restored.imageBlobID, sourceLocation: sourceLocation)
             #expect(
                 try persistence.blobStore.read(blobID: blobID) == expectedImage,
                 sourceLocation: sourceLocation
             )
         }
         if let expectedLinkImage = eager.linkImageData {
-            let blobID = try #require(restored.persistedLinkImageBlobID, sourceLocation: sourceLocation)
+            let blobID = try #require(restored.linkImageBlobID, sourceLocation: sourceLocation)
             #expect(
                 try persistence.blobStore.read(blobID: blobID) == expectedLinkImage,
                 sourceLocation: sourceLocation

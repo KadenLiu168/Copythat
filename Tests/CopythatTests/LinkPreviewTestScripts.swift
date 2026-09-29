@@ -18,11 +18,11 @@ indirect enum LinkPreviewMetadataScript {
     func evaluate(counter: LinkPreviewCounter, key: String) async throws -> LinkPreviewMetadata {
         switch self {
         case .titleOnly(let title):
-            return LinkPreviewMetadata(title: title, imageData: nil)
+            return LinkPreviewMetadata(title: title, image: nil)
         case .empty:
-            return LinkPreviewMetadata(title: nil, imageData: nil)
+            return LinkPreviewMetadata(title: nil, image: nil)
         case .image(let data):
-            return LinkPreviewMetadata(title: nil, imageData: data)
+            return LinkPreviewMetadata(title: nil, image: PreparedMedia(hashing: data))
         case .failure:
             throw URLError(.badServerResponse)
         case .gated(let gate, let then):
@@ -61,10 +61,10 @@ indirect enum LinkPreviewSnapshotScript {
     /// modeling slow resource release after cancellation.
     case cleanupAfterCancel(LinkPreviewGate, LinkPreviewGate, then: LinkPreviewSnapshotScript)
 
-    func evaluate(counter: LinkPreviewCounter, key: String) async throws -> Data {
+    func evaluate(counter: LinkPreviewCounter, key: String) async throws -> PreparedMedia {
         switch self {
         case .image(let data):
-            return data
+            return PreparedMedia(hashing: data)
         case .failure:
             throw URLError(.badServerResponse)
         case .gated(let gate, let then):

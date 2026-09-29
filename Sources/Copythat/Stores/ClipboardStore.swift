@@ -90,7 +90,7 @@ final class ClipboardStore: ObservableObject {
     // `ClipboardStore+LinkPreview.swift`; visibility here stays internal so the
     // same-module extension can operate on the single source of truth.
     typealias LinkMetadataLoader = @Sendable (URL) async throws -> LinkPreviewMetadata
-    typealias LinkSnapshotLoader = @Sendable (URL) async throws -> Data
+    typealias LinkSnapshotLoader = @Sendable (URL) async throws -> PreparedMedia
 
     /// Observable read-only panel visibility. Cards use it to gate their lazy
     /// media loading, so `close()` must publish even while the hosting view
@@ -108,7 +108,7 @@ final class ClipboardStore: ObservableObject {
     var metadataRequestIDs: [UUID: UUID] = [:]
     var activeFallback: (request: LinkFallbackRequest, isCancelled: Bool)?
     var fallbackTask: Task<Void, Never>?
-    var snapshotPositiveCache: [String: Data] = [:]
+    var snapshotPositiveCache: [String: PreparedMedia] = [:]
     var snapshotPositiveCacheOrder: [String] = []
     var snapshotNegativeUntil: [String: TimeInterval] = [:]
     let snapshotCacheLimit = 64
@@ -353,9 +353,9 @@ extension ClipboardStore {
     /// Existing persistence entry point for a validated preview. All snapshot
     /// and metadata updates keep flowing through this path so history save
     /// coordination and media blob handling stay in one place.
-    func applyLinkPreview(itemID: UUID, title: String?, imageData: Data?) {
+    func applyLinkPreview(itemID: UUID, title: String?, linkImage: PreparedMedia?) {
         guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
-        items[index] = items[index].withLinkPreview(title: title, linkImageData: imageData).storageOptimized
+        items[index] = items[index].withLinkPreview(title: title, linkImage: linkImage)
         refreshFilteredItems()
         saveItems()
     }
@@ -472,7 +472,7 @@ extension ClipboardStore {
     func materializedItemForPaste(_ item: ClipboardItem) async throws -> ClipboardItem {
         guard item.kind == .image,
               item.imageData == nil,
-              let blobID = item.persistedImageBlobID else {
+              let blobID = item.imageBlobID else {
             return item
         }
         let data = try await mediaLoader.load(blobID: blobID)
@@ -486,16 +486,17 @@ extension ClipboardStore {
             preview: item.preview,
             sourceApp: item.sourceApp,
             sourceAppIconData: item.sourceAppIconData,
+            sourceAppIconBlobID: item.sourceAppIconBlobID,
             createdAt: item.createdAt,
             isPinned: item.isPinned,
             pinboardName: item.pinboardName,
             textValue: item.textValue,
             fileURLs: item.fileURLs,
             imageData: data,
+            imageBlobID: item.imageBlobID,
             linkTitle: item.linkTitle,
             linkImageData: item.linkImageData,
-            persistedImageBlobID: item.persistedImageBlobID,
-            persistedLinkImageBlobID: item.persistedLinkImageBlobID
+            linkImageBlobID: item.linkImageBlobID
         )
     }
 
@@ -599,6 +600,7 @@ extension ClipboardStore {
             preview: fileURLs.map(\.path).joined(separator: "\n"),
             sourceApp: source.appName,
             sourceAppIconData: source.iconData,
+            sourceAppIconBlobID: source.iconBlobID,
             createdAt: Date(),
             isPinned: false,
             pinboardName: nil,
@@ -616,6 +618,7 @@ extension ClipboardStore {
             preview: rawString,
             sourceApp: source.appName,
             sourceAppIconData: source.iconData,
+            sourceAppIconBlobID: source.iconBlobID,
             createdAt: Date(),
             isPinned: false,
             pinboardName: nil,
@@ -633,6 +636,7 @@ extension ClipboardStore {
             preview: text.truncated(to: 240),
             sourceApp: source.appName,
             sourceAppIconData: source.iconData,
+            sourceAppIconBlobID: source.iconBlobID,
             createdAt: Date(),
             isPinned: false,
             pinboardName: nil,
@@ -659,12 +663,18 @@ extension ClipboardStore {
         )
 
         imageEncodingTask?.cancel()
+        // The bounded PNG and its content address are produced together in the
+        // background; a detached task does not inherit task-local state, so the
+        // observation recorder is carried across explicitly.
+        let recorder = MediaHashObservation.recorder
         let encodingTask = Task.detached(priority: .utility) {
-            Self.pngData(cgImage: cgImage, maxPixel: 1_200)
+            await MediaHashObservation.propagating(recorder) {
+                Self.pngData(cgImage: cgImage, maxPixel: 1_200).map { PreparedMedia(hashing: $0) }
+            }
         }
         imageEncodingTask = Task { @MainActor [weak self] in
-            let data = await encodingTask.value
-            guard !Task.isCancelled, let data else { return }
+            let prepared = await encodingTask.value
+            guard !Task.isCancelled, let prepared else { return }
             let item = ClipboardItem(
                 id: UUID(),
                 kind: .image,
@@ -672,12 +682,14 @@ extension ClipboardStore {
                 preview: "\(Int(size.width)) x \(Int(size.height))",
                 sourceApp: source.appName,
                 sourceAppIconData: source.iconData,
+                sourceAppIconBlobID: source.iconBlobID,
                 createdAt: Date(),
                 isPinned: false,
                 pinboardName: nil,
                 textValue: nil,
                 fileURLs: [],
-                imageData: data
+                imageData: prepared.data,
+                imageBlobID: prepared.id
             )
             guard let self, self.shouldInsertEncodedItem(item) else { return }
             self.add(item)
@@ -783,22 +795,11 @@ extension ClipboardStore {
         return source
     }
 
+    /// Identity of the current pasteboard image, in the same form as an item's
+    /// `contentKey`, so a restored unloaded image matches without being read.
     private func imageContentKey(for image: NSImage) -> String? {
         guard let data = normalizedImageData(for: image) else { return nil }
-        return ClipboardItem(
-            id: UUID(),
-            kind: .image,
-            title: "Image",
-            preview: "",
-            sourceApp: "",
-            sourceAppIconData: nil,
-            createdAt: Date(),
-            isPinned: false,
-            pinboardName: nil,
-            textValue: nil,
-            fileURLs: [],
-            imageData: data
-        ).contentKey
+        return "image:\(PreparedMedia(hashing: data).id)"
     }
 
     private nonisolated static func pngData(cgImage: CGImage, maxPixel: CGFloat) -> Data? {

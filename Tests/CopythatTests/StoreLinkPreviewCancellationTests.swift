@@ -31,7 +31,7 @@ struct StoreLinkPreviewCancellationTests {
             initialItems: [item],
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
             fetchLinkSnapshot: LinkPreviewSnapshotScript
                 .gated(gate, then: .image(snapshotData))
                 .loader(counter: counter, key: url)
@@ -66,7 +66,7 @@ struct StoreLinkPreviewCancellationTests {
             initialItems: [item],
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
             fetchLinkSnapshot: LinkPreviewSnapshotScript
                 .lateAfterCancel(gate, then: .image(snapshotData))
                 .loader(counter: counter, key: url)
@@ -106,13 +106,13 @@ struct StoreLinkPreviewCancellationTests {
             initialItems: [alpha, beta],
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
             fetchLinkSnapshot: { url in
                 counter.begin("snapshot:\(url.absoluteString)")
                 defer { counter.end("snapshot:\(url.absoluteString)") }
                 let attempt = counter.value("snapshot:\(alphaURL)")
                 await (attempt == 1 ? oldGate : newGate).waitUntilReleased()
-                return snapshotData
+                return PreparedMedia(hashing: snapshotData)
             }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
@@ -154,14 +154,14 @@ struct StoreLinkPreviewCancellationTests {
             initialItems: [item],
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
             fetchLinkSnapshot: LinkPreviewSnapshotScript.lateAfterCancel(gate, then: .image(snapshotData))
                 .loader(counter: counter, key: "pending")
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
         store.panelDidOpen()
         await counter.waitFor("snapshot:pending", reaching: 1)
-        store.applyLinkPreview(itemID: item.id, title: "Existing", imageData: snapshotData)
+        store.applyLinkPreview(itemID: item.id, title: "Existing", linkImage: PreparedMedia(hashing: snapshotData))
         #expect(store.activeFallback?.isCancelled == true)
         let savesBeforeLateResult = recorder.count
         gate.release()
@@ -188,7 +188,7 @@ struct StoreLinkPreviewCancellationTests {
             initialItems: [itemA, itemB, itemC],
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
             fetchLinkSnapshot: { url in
                 counter.begin("snapshot:\(url.absoluteString)")
                 defer { counter.end("snapshot:\(url.absoluteString)") }

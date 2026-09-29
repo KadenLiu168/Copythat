@@ -1,6 +1,7 @@
 @testable import Copythat
 import AppKit
 import LinkPresentation
+import CryptoKit
 import Testing
 import UniformTypeIdentifiers
 
@@ -16,9 +17,27 @@ struct LinkPreviewFetcherMetadataTests {
         let result = try await LinkPreviewFetcher.extractPreview(from: metadata)
 
         #expect(result.title == "Example Domain")
-        let image = try #require(result.imageData.flatMap(NSImage.init(data:)))
+        let image = try #require(result.image.flatMap { NSImage(data: $0.data) })
         #expect(image.size == NSSize(width: 32, height: 32))
         #expect(max(image.size.width, image.size.height) <= 640)
+    }
+
+    @Test func finalizedPreviewCarriesExactlyOneIdentityHash() async throws {
+        let counters = MediaOperationCounters()
+        let metadata = LPLinkMetadata()
+        metadata.imageProvider = NSItemProvider(object: LinkPreviewFixture.largeTestImage(red: true))
+
+        counters.reset()
+        let result = try await counters.measure {
+            try await LinkPreviewFetcher.extractPreview(from: metadata)
+        }
+
+        let image = try #require(result.image)
+        #expect(counters.identityHashCount == 1)
+        #expect(counters.integrityHashCount == 0)
+        #expect(image.id == sha256Hex(image.data))
+        let decoded = try #require(NSImage(data: image.data))
+        #expect(max(decoded.size.width, decoded.size.height) <= 640)
     }
 
     @Test func cancelledExtractionDoesNotReturnEmptySuccess() async {
@@ -77,7 +96,7 @@ struct LinkPreviewFetcherMetadataTests {
         let result = try await LinkPreviewFetcher.extractPreview(from: metadata)
 
         #expect(result.title == "Icon only")
-        #expect(result.imageData != nil)
+        #expect(result.image != nil)
     }
 
     @Test func extractPreviewAllowsEmptySuccess() async throws {
@@ -86,7 +105,7 @@ struct LinkPreviewFetcherMetadataTests {
         let result = try await LinkPreviewFetcher.extractPreview(from: metadata)
 
         #expect(result.title == nil)
-        #expect(result.imageData == nil)
+        #expect(result.image == nil)
     }
 
     @Test func extractPreviewTrimsWhitespaceOnlyTitleToNil() async throws {
@@ -221,4 +240,10 @@ struct LinkPreviewCallbackBridgeTests {
 
         #expect(value == "sync")
     }
+}
+
+private func sha256Hex(_ data: Data) -> String {
+    SHA256.hash(data: data)
+        .map { String(format: "%02x", $0) }
+        .joined()
 }

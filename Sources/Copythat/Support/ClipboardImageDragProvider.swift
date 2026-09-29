@@ -19,7 +19,7 @@ enum ClipboardImageDragProvider {
         if let image = item.image {
             return NSItemProvider(object: image)
         }
-        guard item.kind == .image, let blobID = item.persistedImageBlobID else {
+        guard item.kind == .image, let blobID = item.imageBlobID else {
             return NSItemProvider(object: (item.textValue ?? item.preview) as NSString)
         }
         return asyncPNGProvider(blobID: blobID, mediaLoader: mediaLoader)

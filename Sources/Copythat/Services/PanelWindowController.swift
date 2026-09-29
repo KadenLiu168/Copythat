@@ -106,7 +106,7 @@ final class PanelWindowController {
     }
 
     private func needsMediaMaterialization(_ item: ClipboardItem) -> Bool {
-        item.kind == .image && item.imageData == nil && item.persistedImageBlobID != nil
+        item.kind == .image && item.imageData == nil && item.imageBlobID != nil
     }
 
     private func handOffPaste(_ item: ClipboardItem, targetApp: NSRunningApplication?) {

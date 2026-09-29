@@ -132,7 +132,7 @@ struct StorePanelWiringTests {
             textValue: nil,
             fileURLs: [],
             imageData: nil,
-            persistedImageBlobID: blobID
+            imageBlobID: blobID
         )
         let model = AppModel(
             historySaveCoordinator: ClipboardHistorySaveCoordinator(worker: ClipboardHistorySaveWorker(

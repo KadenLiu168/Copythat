@@ -29,7 +29,7 @@ struct StoreLazyLinkPreviewTests {
         )
         let restored = try #require(store.items.first)
         #expect(restored.linkImageData == nil)
-        #expect(restored.persistedLinkImageBlobID != nil)
+        #expect(restored.linkImageBlobID != nil)
         #expect(restored.linkTitle == "Persisted title")
 
         store.panelDidOpen()
@@ -42,7 +42,7 @@ struct StoreLazyLinkPreviewTests {
 
         #expect(counter.value("metadata") == 0)
         #expect(counter.value("snapshot") == 0)
-        #expect(store.items.first?.persistedLinkImageBlobID == restored.persistedLinkImageBlobID)
+        #expect(store.items.first?.linkImageBlobID == restored.linkImageBlobID)
         #expect(store.items.first?.linkImageData == nil)
 
         AcceptanceMetrics.record(
@@ -78,7 +78,7 @@ struct StoreLazyLinkPreviewTests {
         #expect(counter.value("metadata") == 0)
         #expect(counter.value("snapshot") == 0)
         #expect(store.items.first?.linkImageData == nil)
-        #expect(store.items.first?.persistedLinkImageBlobID == blobID)
+        #expect(store.items.first?.linkImageBlobID == blobID)
         #expect(store.items.first?.linkTitle == "Stored")
         AcceptanceMetrics.record(
             scenario: "link-preview-lazy",
@@ -104,11 +104,11 @@ struct StoreLazyLinkPreviewTests {
                 counter.begin("metadata")
                 defer { counter.end("metadata") }
                 await gate.waitOrCancelled()
-                return LinkPreviewMetadata(title: "Late title", imageData: nil)
+                return LinkPreviewMetadata(title: "Late title", image: nil)
             },
             fetchLinkSnapshot: { _ in
                 counter.mark("snapshot")
-                return snapshotImage
+                return PreparedMedia(hashing: snapshotImage)
             }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
@@ -126,7 +126,7 @@ struct StoreLazyLinkPreviewTests {
 
         let merged = try #require(store.items.first)
         #expect(merged.linkTitle == "Late title")
-        #expect(merged.persistedLinkImageBlobID == blobID)
+        #expect(merged.linkImageBlobID == blobID)
         #expect(merged.linkImageData == nil)
         #expect(store.linkMetadataStates[item.id] == .successWithImage)
         #expect(counter.value("snapshot") == 0)
@@ -155,7 +155,7 @@ struct StoreLazyLinkPreviewTests {
                 counter.begin("metadata")
                 defer { counter.end("metadata") }
                 await gate.waitOrCancelled()
-                return LinkPreviewMetadata(title: "Fresh", imageData: metadataImage)
+                return LinkPreviewMetadata(title: "Fresh", image: PreparedMedia(hashing: metadataImage))
             },
             fetchLinkSnapshot: { _ in throw URLError(.badServerResponse) }
         )
@@ -167,8 +167,8 @@ struct StoreLazyLinkPreviewTests {
 
         let merged = try #require(store.items.first)
         #expect(merged.linkTitle == "Fresh")
-        #expect(merged.linkImageData != nil)
-        #expect(merged.persistedLinkImageBlobID == nil)
+        #expect(merged.linkImageData == metadataImage)
+        #expect(merged.linkImageBlobID == sha256Hex(metadataImage))
         #expect(merged.hasLinkImagePayload)
         let savedImage = try #require(saveRecorder.last?.first?.linkImageData)
         #expect(savedImage == merged.linkImageData)
@@ -218,10 +218,10 @@ struct StoreLazyLinkPreviewTests {
             textValue: item.textValue,
             fileURLs: item.fileURLs,
             imageData: item.imageData,
+            imageBlobID: item.imageBlobID,
             linkTitle: item.linkTitle,
             linkImageData: item.linkImageData,
-            persistedImageBlobID: item.persistedImageBlobID,
-            persistedLinkImageBlobID: blobID
+            linkImageBlobID: blobID
         )
     }
 

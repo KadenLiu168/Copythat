@@ -20,6 +20,7 @@ struct ClipboardHistoryBlobStore: @unchecked Sendable {
     /// Reads a blob and verifies its SHA256 before releasing bytes.
     func read(blobID: String) throws -> Data {
         let data = try readData(try blobURL(for: blobID))
+        MediaHashObservation.record(.integrity)
         guard Self.sha256Hex(data) == blobID else {
             throw ClipboardHistoryPersistenceError.invalidBlob(blobID)
         }
@@ -138,15 +139,15 @@ final class ClipboardHistoryPersistence: @unchecked Sendable {
         let persistedItems = try items.map { item in
             PersistedClipboardItemV2(
                 item: item,
-                sourceAppIconBlob: blobID(for: item.sourceAppIconData, pendingBlobs: &pendingBlobs),
-                imageBlob: try blobID(
-                    for: item.imageData,
-                    persistedBlobID: item.persistedImageBlobID,
+                sourceAppIconBlob: try stagedBlob(
+                    item.sourceAppIconBlobID,
+                    data: item.sourceAppIconData,
                     pendingBlobs: &pendingBlobs
                 ),
-                linkImageBlob: try blobID(
-                    for: item.linkImageData,
-                    persistedBlobID: item.persistedLinkImageBlobID,
+                imageBlob: try stagedBlob(item.imageBlobID, data: item.imageData, pendingBlobs: &pendingBlobs),
+                linkImageBlob: try stagedBlob(
+                    item.linkImageBlobID,
+                    data: item.linkImageData,
                     pendingBlobs: &pendingBlobs
                 )
             )
@@ -233,38 +234,22 @@ final class ClipboardHistoryPersistence: @unchecked Sendable {
         return try JSONDecoder().decode([ClipboardItem].self, from: data)
     }
 
-    /// Media bytes win. An item without resident bytes reuses its validated
-    /// reference without reading or hashing the referenced payload; an invalid
-    /// reference fails the save before any manifest or GC work starts.
-    private func blobID(
-        for data: Data?,
-        persistedBlobID: String?,
+    /// Media identities are already known when a save starts, so this validates
+    /// the address and queues resident bytes once per address whose blob is
+    /// absent. A reference is kept without touching its file, and no payload is
+    /// read or hashed. An address that cannot name a blob, or bytes that arrive
+    /// without one, fail the save before any blob, manifest, or GC work starts.
+    private func stagedBlob(
+        _ blobID: String?,
+        data: Data?,
         pendingBlobs: inout [String: Data]
     ) throws -> String? {
-        if let data {
-            return blobID(for: data, pendingBlobs: &pendingBlobs)
+        guard let blobID else {
+            guard data == nil else { throw ClipboardHistoryPersistenceError.missingBlobID }
+            return nil
         }
-        guard let persistedBlobID else { return nil }
-        _ = try blobs.blobURL(for: persistedBlobID)
-        return persistedBlobID
-    }
-
-    private func blobID(for data: Data?, pendingBlobs: inout [String: Data]) -> String? {
-        guard let data else { return nil }
-        let blobID = ClipboardHistoryBlobStore.sha256Hex(data)
-
-        if pendingBlobs[blobID] != nil { return blobID }
-        let blobURL = try? blobs.blobURL(for: blobID)
-        guard let blobURL, FileManager.default.fileExists(atPath: blobURL.path) else {
-            pendingBlobs[blobID] = data
-            return blobID
-        }
-
-        if let existingData = try? readData(blobURL),
-           ClipboardHistoryBlobStore.sha256Hex(existingData) == blobID {
-            return blobID
-        }
-
+        let blobURL = try blobs.blobURL(for: blobID)
+        guard let data, !FileManager.default.fileExists(atPath: blobURL.path) else { return blobID }
         pendingBlobs[blobID] = data
         return blobID
     }
@@ -346,25 +331,29 @@ private struct PersistedClipboardItemV2: Codable {
     }
 
     /// Source icons stay eager; heavy media is represented by its persisted
-    /// content address so restore does not read or hash it.
+    /// content address so restore does not read or hash it. Every address comes
+    /// from the manifest, so no payload identity is recomputed here: an icon's
+    /// verified bytes are attached to the address they were read from.
     func makeClipboardItem(loadIcon: (String?) throws -> Data?) throws -> ClipboardItem {
-        ClipboardItem(
+        let iconBlobID = sourceAppIconBlob
+        return ClipboardItem(
             id: id,
             kind: kind,
             title: title,
             preview: preview,
             sourceApp: sourceApp,
-            sourceAppIconData: try loadIcon(sourceAppIconBlob),
+            sourceAppIconData: try loadIcon(iconBlobID),
+            sourceAppIconBlobID: iconBlobID,
             createdAt: createdAt,
             isPinned: isPinned,
             pinboardName: pinboardName,
             textValue: textValue,
             fileURLs: fileURLs,
             imageData: nil,
+            imageBlobID: imageBlob,
             linkTitle: linkTitle,
             linkImageData: nil,
-            persistedImageBlobID: imageBlob,
-            persistedLinkImageBlobID: linkImageBlob
+            linkImageBlobID: linkImageBlob
         )
     }
 }
@@ -372,4 +361,5 @@ private struct PersistedClipboardItemV2: Codable {
 private enum ClipboardHistoryPersistenceError: Error {
     case unsupportedVersion(Int)
     case invalidBlob(String)
+    case missingBlobID
 }

@@ -83,13 +83,14 @@ final class LinkPreviewSnapshotController {
     }
 
     /// Runs one snapshot attempt with the production WKWebView adapter. Returns
-    /// PNG data, or nil on failure, timeout without usable image, or cancellation.
-    static func snapshotData(url: URL) async -> Data? {
+    /// the final bounded PNG with its content address, or nil on failure,
+    /// timeout without usable image, or cancellation.
+    static func snapshotData(url: URL) async -> PreparedMedia? {
         let controller = LinkPreviewSnapshotController(driver: LinkPreviewWKWebViewDriver())
         return await controller.run(url: url)
     }
 
-    func run(url: URL) async -> Data? {
+    func run(url: URL) async -> PreparedMedia? {
         guard !Task.isCancelled else { return finish(with: nil) }
         driver.eventHandler = { [weak self] event in
             self?.handleEvent(event)
@@ -114,7 +115,7 @@ final class LinkPreviewSnapshotController {
 
     // MARK: - Snapshot phase
 
-    private func runSnapshotPhase() async -> Data? {
+    private func runSnapshotPhase() async -> PreparedMedia? {
         guard !Task.isCancelled, terminalWake == nil, !snapshotSubmitted else { return nil }
         snapshotSubmitted = true
 
@@ -139,7 +140,10 @@ final class LinkPreviewSnapshotController {
             snapshotImage = nil
         }
         guard !Task.isCancelled, terminalWake == nil else { return nil }
+        // The final bounded PNG and its content address are produced together
+        // here, before any consumer can apply or store the payload.
         return snapshotImage?.pngData(maxPixel: LinkPreviewSnapshotMetrics.pixelLimit)
+            .map { PreparedMedia(hashing: $0) }
     }
 
     private func handleSnapshotCallback(_ image: NSImage?) {
@@ -199,7 +203,7 @@ final class LinkPreviewSnapshotController {
     /// Marks the terminal state, cancels deadlines, stops loading, detaches the
     /// driver's navigation delegate and releases the application-owned web view.
     /// Runs at most once per request.
-    private func finish(with data: Data?) -> Data? {
+    private func finish(with media: PreparedMedia?) -> PreparedMedia? {
         guard !isFinished else { return nil }
         isFinished = true
         phase = .finished
@@ -209,7 +213,7 @@ final class LinkPreviewSnapshotController {
         driver.eventHandler = nil
         driver.stopLoading()
         driver.detach()
-        return data
+        return media
     }
 
     // MARK: - Deadlines

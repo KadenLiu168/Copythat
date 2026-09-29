@@ -34,7 +34,7 @@ final class ClipboardCardMediaState: ObservableObject {
 
         switch item.kind {
         case .image:
-            guard item.imageData == nil, let blobID = item.persistedImageBlobID else { return }
+            guard item.imageData == nil, let blobID = item.imageBlobID else { return }
             do {
                 let data = try await mediaLoader.load(blobID: blobID)
                 guard !Task.isCancelled, isAuthorized() else { return }
@@ -48,7 +48,7 @@ final class ClipboardCardMediaState: ObservableObject {
                 imageLoadFailed = true
             }
         case .url:
-            guard item.linkImageData == nil, let blobID = item.persistedLinkImageBlobID else { return }
+            guard item.linkImageData == nil, let blobID = item.linkImageBlobID else { return }
             do {
                 let data = try await mediaLoader.load(blobID: blobID)
                 guard !Task.isCancelled, isAuthorized() else { return }

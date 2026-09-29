@@ -87,8 +87,8 @@ struct ClipboardHistoryPerformanceTests {
         #expect(iconReads.count == 4, "shared source icons are read once each")
         #expect(iconReads.allSatisfy { !heavyBlobIDs.contains(String($0.dropLast(5))) })
         #expect(restored.allSatisfy { $0.imageData == nil && $0.linkImageData == nil })
-        #expect(restored.filter { $0.persistedImageBlobID != nil }.count == 250)
-        #expect(restored.filter { $0.persistedLinkImageBlobID != nil }.count == 250)
+        #expect(restored.filter { $0.imageBlobID != nil }.count == 250)
+        #expect(restored.filter { $0.linkImageBlobID != nil }.count == 250)
         #expect(restored.allSatisfy { $0.sourceAppIconData != nil })
         #expect(restored.map(\.contentKey) == items.map(\.contentKey))
 

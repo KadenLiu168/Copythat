@@ -185,7 +185,7 @@ struct ClipboardStoreImageDeletionTests {
             textValue: nil,
             fileURLs: [],
             imageData: nil,
-            persistedImageBlobID: blobID
+            imageBlobID: blobID
         )
     }
 

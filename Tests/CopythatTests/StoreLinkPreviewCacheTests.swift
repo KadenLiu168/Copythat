@@ -27,10 +27,10 @@ struct StoreLinkPreviewCacheTests {
             initialItems: [pinned],
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
             fetchLinkSnapshot: { _ in
                 counter.mark("snapshot:loader")
-                return snapshotData
+                return PreparedMedia(hashing: snapshotData)
             }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
@@ -83,8 +83,8 @@ struct StoreLinkPreviewCacheTests {
             initialItems: [],
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
-            fetchLinkSnapshot: { _ in self.snapshotData }
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
+            fetchLinkSnapshot: { _ in PreparedMedia(hashing: self.snapshotData) }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
         store.panelDidOpen()
@@ -115,7 +115,7 @@ struct StoreLinkPreviewCacheTests {
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
             uptimeProvider: { clock.now },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
             fetchLinkSnapshot: { _ in
                 counter.mark("snapshot:attempts")
                 throw URLError(.badServerResponse)
@@ -153,7 +153,7 @@ struct StoreLinkPreviewCacheTests {
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
             uptimeProvider: { clock.now },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: "Example", image: nil) },
             fetchLinkSnapshot: { _ in throw URLError(.badServerResponse) }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
@@ -187,7 +187,7 @@ struct StoreLinkPreviewCacheTests {
                 .loader(counter: counter, key: url),
             fetchLinkSnapshot: { _ in
                 counter.mark("snapshot:loader")
-                return self.snapshotData
+                return PreparedMedia(hashing: self.snapshotData)
             }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
@@ -219,7 +219,7 @@ struct StoreLinkPreviewCacheTests {
             },
             fetchLinkSnapshot: { _ in
                 counter.mark("snapshot:loader")
-                return self.snapshotData
+                return PreparedMedia(hashing: self.snapshotData)
             }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
@@ -247,11 +247,11 @@ struct StoreLinkPreviewCacheTests {
             persistItems: { recorder.record($0) },
             fetchLinkMetadata: { _ in
                 counter.mark("metadata:\(url)")
-                return LinkPreviewMetadata(title: "Fresh", imageData: nil)
+                return LinkPreviewMetadata(title: "Fresh", image: nil)
             },
             fetchLinkSnapshot: { _ in
                 counter.mark("snapshot:loader")
-                return self.snapshotData
+                return PreparedMedia(hashing: self.snapshotData)
             }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
@@ -281,11 +281,11 @@ struct StoreLinkPreviewCacheTests {
             persistItems: { recorder.record($0) },
             fetchLinkMetadata: { _ in
                 counter.mark("metadata:loader")
-                return LinkPreviewMetadata(title: "Fresh", imageData: nil)
+                return LinkPreviewMetadata(title: "Fresh", image: nil)
             },
             fetchLinkSnapshot: { _ in
                 counter.mark("snapshot:loader")
-                return self.snapshotData
+                return PreparedMedia(hashing: self.snapshotData)
             }
         )
 

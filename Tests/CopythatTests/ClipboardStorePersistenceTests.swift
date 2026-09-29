@@ -174,7 +174,7 @@ struct ClipboardStorePersistenceTests {
             persistItems: { coordinator.requestSave($0) }
         )
         let png = try #require(testImage().pngData(maxPixel: 32))
-        store.applyLinkPreview(itemID: original.id, title: "Searchable preview title", imageData: png)
+        store.applyLinkPreview(itemID: original.id, title: "Searchable preview title", linkImage: PreparedMedia(hashing: png))
         store.togglePin(original)
         store.move(original, toPinboard: "Work")
         #expect(await coordinator.flush())
@@ -198,9 +198,9 @@ struct ClipboardStorePersistenceTests {
         #expect(item.sourceApp == original.sourceApp)
         #expect(item.linkTitle == "Searchable preview title")
         #expect(item.linkImageData == nil)
-        #expect(item.persistedLinkImageBlobID == sha256Hex(png))
+        #expect(item.linkImageBlobID == sha256Hex(png))
         let materializedPreview = try reader.blobStore.read(
-            blobID: try #require(item.persistedLinkImageBlobID)
+            blobID: try #require(item.linkImageBlobID)
         )
         #expect(materializedPreview == png)
         #expect(NSImage(data: materializedPreview)?.size == NSSize(width: 32, height: 32))
@@ -308,12 +308,12 @@ struct ClipboardStorePersistenceTests {
         let reloaded = try persistence.loadItems()
         let reloadedURL = try #require(reloaded.first { $0.id == urlItem.id })
         #expect(reloadedURL.linkImageData == nil)
-        #expect(reloadedURL.persistedLinkImageBlobID == sha256Hex(linkImageBytes))
+        #expect(reloadedURL.linkImageBlobID == sha256Hex(linkImageBytes))
         #expect(reloadedURL.linkTitle == "Restored link")
         #expect(reloadedURL.pinboardName == "Ideas")
         let reloadedImage = try #require(reloaded.first { $0.id == imageItem.id })
         #expect(reloadedImage.imageData == nil)
-        #expect(reloadedImage.persistedImageBlobID == sha256Hex(imageBytes))
+        #expect(reloadedImage.imageBlobID == sha256Hex(imageBytes))
         #expect(reloadedImage.isPinned)
         #expect(reloaded.contains { $0.textValue == "unrelated" })
 
@@ -327,7 +327,7 @@ struct ClipboardStorePersistenceTests {
             scenario: "history-gc-and-mutations",
             metric: "heavyReferencesPreservedAfterFlush",
             expected: "2",
-            observed: "\([reloadedURL.persistedLinkImageBlobID != nil, reloadedImage.persistedImageBlobID != nil].filter { $0 }.count)"
+            observed: "\([reloadedURL.linkImageBlobID != nil, reloadedImage.imageBlobID != nil].filter { $0 }.count)"
         )
     }
 
@@ -370,7 +370,7 @@ struct ClipboardStorePersistenceTests {
 
         let restored = try persistence.loadItems()
         #expect(restored.first?.imageData == nil)
-        #expect(restored.first?.persistedImageBlobID == sha256Hex(imageBytes))
+        #expect(restored.first?.imageBlobID == sha256Hex(imageBytes))
 
         let coordinator = ClipboardHistorySaveCoordinator(
             worker: ClipboardHistorySaveWorker(persistence: persistence)
@@ -449,7 +449,7 @@ struct ClipboardStorePersistenceTests {
         store.remove(transient)
         store.add(final)
         let preview = try #require(testImage().pngData(maxPixel: 32))
-        store.applyLinkPreview(itemID: url.id, title: "Latest preview", imageData: preview)
+        store.applyLinkPreview(itemID: url.id, title: "Latest preview", linkImage: PreparedMedia(hashing: preview))
 
         await worker.releaseFirstGeneration()
         #expect(await coordinator.flush())
@@ -545,7 +545,7 @@ struct ClipboardStorePersistenceTests {
         #expect(await worker.recordedSaves().last?.items.contains(where: { $0.id == removed.id }) == false)
 
         let previewImage = try #require(testImage().pngData(maxPixel: 32))
-        store.applyLinkPreview(itemID: url.id, title: "Loaded preview", imageData: previewImage)
+        store.applyLinkPreview(itemID: url.id, title: "Loaded preview", linkImage: PreparedMedia(hashing: previewImage))
         #expect(await coordinator.flush())
         let savedURL = await worker.recordedSaves().last?.items.first(where: { $0.id == url.id })
         #expect(savedURL?.linkTitle == "Loaded preview")
@@ -612,7 +612,7 @@ struct ClipboardStorePersistenceTests {
                 defer { counter.end("metadata:\(requestURL.absoluteString)") }
                 if requestURL.absoluteString == url {
                     // Empty metadata success: eligible, no data change, no save.
-                    return LinkPreviewMetadata(title: nil, imageData: nil)
+                    return LinkPreviewMetadata(title: nil, image: nil)
                 }
                 return try await LinkPreviewMetadataScript
                     .lateAfterCancel(gate, then: .titleOnly("Late"))
@@ -639,7 +639,7 @@ struct ClipboardStorePersistenceTests {
         let savesAfterLateCompletions = await worker.recordedSaves().count
         // Empty metadata and the removed item's late completion created no save.
         let previewImage = try #require(testImage().pngData(maxPixel: 32))
-        store.applyLinkPreview(itemID: urlItem.id, title: "Valid preview", imageData: previewImage)
+        store.applyLinkPreview(itemID: urlItem.id, title: "Valid preview", linkImage: PreparedMedia(hashing: previewImage))
         #expect(await coordinator.flush())
         let saves = await worker.recordedSaves()
         let latest = try #require(saves.last)

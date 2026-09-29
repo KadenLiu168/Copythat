@@ -28,7 +28,7 @@ extension ClipboardStore {
     }
 
     private enum LinkSnapshotOutcome {
-        case apply(Data)
+        case apply(PreparedMedia)
         case failure
         case discard
     }
@@ -181,7 +181,7 @@ extension ClipboardStore {
 
     private func logLinkMetadataOutcome(itemID: UUID, metadata: LinkPreviewMetadata) {
         let outcome: ClipboardDiagnostics.LinkPreviewOutcome
-        if metadata.imageData != nil {
+        if metadata.image != nil {
             outcome = .metadataImage
         } else if metadata.title != nil {
             outcome = .metadataTitleOnly
@@ -194,11 +194,11 @@ extension ClipboardStore {
     private func applyLinkMetadata(itemID: UUID, index: Int, metadata: LinkPreviewMetadata) {
         let existing = items[index]
         // A payload the item already has — resident or still persisted — keeps
-        // its identity; nil metadata bytes must not overwrite an unloaded
+        // its identity; absent metadata bytes must not overwrite an unloaded
         // preview, and neither outcome is classified as image-less. Only an
         // item without any payload accepts new metadata bytes.
-        let replacementImage = existing.hasLinkImagePayload ? nil : metadata.imageData
-        linkMetadataStates[itemID] = existing.hasLinkImagePayload || metadata.imageData != nil
+        let replacementImage = existing.hasLinkImagePayload ? nil : metadata.image
+        linkMetadataStates[itemID] = existing.hasLinkImagePayload || metadata.image != nil
             ? .successWithImage
             : .successWithoutImage
         let mergedTitle = metadata.title ?? existing.linkTitle
@@ -208,8 +208,10 @@ extension ClipboardStore {
             return
         }
 
+        // The payload is already finalized and bounded, so it is applied as it
+        // is: no re-encoding and no new identity.
         updateItem(at: index) {
-            $0.withLinkPreview(title: mergedTitle, linkImageData: replacementImage).storageOptimized
+            $0.withLinkPreview(title: mergedTitle, linkImage: replacementImage)
         }
         refreshFilteredItems()
         saveItems()
@@ -224,7 +226,7 @@ extension ClipboardStore {
             // still subject to the same visibility/selection/eligibility checks.
             // Only a real apply may re-reconcile; otherwise stop here to keep
             // the cache-hit path free of re-entry loops.
-            let applied = applyValidatedSnapshot(target: target, imageData: cached)
+            let applied = applyValidatedSnapshot(target: target, image: cached)
             diagnostics.logLinkPreview(
                 itemID: target.itemID,
                 outcome: applied ? .snapshotCacheApplied : .snapshotFailed,
@@ -248,7 +250,7 @@ extension ClipboardStore {
         let loader = fetchLinkSnapshot
         let requestID = request.id
         let task = Task { [weak self] in
-            let result: Result<Data, Error>
+            let result: Result<PreparedMedia, Error>
             do {
                 result = .success(try await loader(target.url))
             } catch {
@@ -263,7 +265,7 @@ extension ClipboardStore {
     private func completeLinkFallback(
         requestID: UUID,
         target: LinkFallbackTarget,
-        result: Result<Data, Error>
+        result: Result<PreparedMedia, Error>
     ) {
         linkPreviewTasks.remove(requestID)
         guard let active = activeFallback, active.request.id == requestID else {
@@ -284,16 +286,16 @@ extension ClipboardStore {
             return
         }
 
-        let imageData: Data?
-        if case .success(let data) = result {
-            imageData = data
+        let image: PreparedMedia?
+        if case .success(let media) = result {
+            image = media
         } else {
-            imageData = nil
+            image = nil
         }
 
-        switch validatedSnapshotOutcome(target: target, imageData: imageData) {
-        case .apply(let data):
-            let applied = applyValidatedSnapshot(target: target, imageData: data)
+        switch validatedSnapshotOutcome(target: target, image: image) {
+        case .apply(let media):
+            let applied = applyValidatedSnapshot(target: target, image: media)
             diagnostics.logLinkPreview(
                 itemID: target.itemID,
                 outcome: applied ? .snapshotApplied : .snapshotFailed,
@@ -313,7 +315,7 @@ extension ClipboardStore {
     /// checks for snapshot results (live and cached alike).
     private func validatedSnapshotOutcome(
         target: LinkFallbackTarget,
-        imageData: Data?
+        image: PreparedMedia?
     ) -> LinkSnapshotOutcome {
         guard panelVisible,
               selectedID == target.itemID,
@@ -324,20 +326,20 @@ extension ClipboardStore {
               linkMetadataStates[item.id] == .successWithoutImage else {
             return .discard
         }
-        guard let imageData else { return .failure }
-        return .apply(imageData)
+        guard let image else { return .failure }
+        return .apply(image)
     }
 
     /// Applies a validated snapshot through the existing persistence path.
     /// Returns whether anything was applied, so cache-hit reconcile can never
     /// re-enter itself.
     @discardableResult
-    private func applyValidatedSnapshot(target: LinkFallbackTarget, imageData: Data) -> Bool {
-        switch validatedSnapshotOutcome(target: target, imageData: imageData) {
+    private func applyValidatedSnapshot(target: LinkFallbackTarget, image: PreparedMedia) -> Bool {
+        switch validatedSnapshotOutcome(target: target, image: image) {
         case .apply:
-            storeCachedSnapshot(imageData, for: target.url)
+            storeCachedSnapshot(image, for: target.url)
             if let item = filteredItems.first(where: { $0.id == target.itemID }) {
-                applyLinkPreview(itemID: target.itemID, title: item.linkTitle, imageData: imageData)
+                applyLinkPreview(itemID: target.itemID, title: item.linkTitle, linkImage: image)
             }
             return true
         case .failure, .discard:
@@ -371,13 +373,13 @@ extension ClipboardStore {
 
     // MARK: Session snapshot caches
 
-    private func storeCachedSnapshot(_ data: Data, for url: URL) {
+    private func storeCachedSnapshot(_ media: PreparedMedia, for url: URL) {
         let key = url.absoluteString
         if snapshotPositiveCache[key] != nil {
-            snapshotPositiveCache[key] = data
+            snapshotPositiveCache[key] = media
             return
         }
-        snapshotPositiveCache[key] = data
+        snapshotPositiveCache[key] = media
         snapshotPositiveCacheOrder.append(key)
         if snapshotPositiveCacheOrder.count > snapshotCacheLimit {
             let evictedKey = snapshotPositiveCacheOrder.removeFirst()

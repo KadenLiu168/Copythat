@@ -6,7 +6,9 @@ import UniformTypeIdentifiers
 
 struct LinkPreviewMetadata: Sendable {
     let title: String?
-    let imageData: Data?
+    /// Final bounded preview payload with its content address, so applying or
+    /// storing it never re-encodes or re-hashes it.
+    let image: PreparedMedia?
 }
 
 enum LinkPreviewFetchError: Error {
@@ -114,14 +116,15 @@ enum LinkPreviewFetcher {
         return try await extractPreview(from: metadata)
     }
 
-    /// Runs Copythat's browser snapshot stage for a URL and returns its PNG data.
-    /// Throws `CancellationError` when cancelled and other errors when no usable
-    /// snapshot could be produced. The WebKit lifecycle itself lives in the
-    /// focused snapshot controller file; this is only the store-facing seam.
-    static func fetchWebSnapshot(url: URL) async throws -> Data {
-        let data = await LinkPreviewSnapshotController.snapshotData(url: url)
-        if let data {
-            return data
+    /// Runs Copythat's browser snapshot stage for a URL and returns its final
+    /// bounded PNG with its content address. Throws `CancellationError` when
+    /// cancelled and other errors when no usable snapshot could be produced. The
+    /// WebKit lifecycle itself lives in the focused snapshot controller file;
+    /// this is only the store-facing seam.
+    static func fetchWebSnapshot(url: URL) async throws -> PreparedMedia {
+        let media = await LinkPreviewSnapshotController.snapshotData(url: url)
+        if let media {
+            return media
         }
         if Task.isCancelled {
             throw CancellationError()
@@ -136,13 +139,13 @@ enum LinkPreviewFetcher {
         let title = metadata.title?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty
-        var imageData = try await providerImageData(metadata.imageProvider)
+        var image = try await providerImageData(metadata.imageProvider)
         try Task.checkCancellation()
-        if imageData == nil {
-            imageData = try await providerImageData(metadata.iconProvider)
+        if image == nil {
+            image = try await providerImageData(metadata.iconProvider)
         }
         try Task.checkCancellation()
-        return LinkPreviewMetadata(title: title, imageData: imageData)
+        return LinkPreviewMetadata(title: title, image: image)
     }
 
     // MARK: - LPMetadataProvider bridge
@@ -183,13 +186,13 @@ enum LinkPreviewFetcher {
 
     // MARK: - NSItemProvider bridges
 
-    private static func providerImageData(_ provider: NSItemProvider?) async throws -> Data? {
+    private static func providerImageData(_ provider: NSItemProvider?) async throws -> PreparedMedia? {
         guard let provider else { return nil }
 
         if provider.canLoadObject(ofClass: NSImage.self) {
             let image = try await loadProviderObject(provider)
             try Task.checkCancellation()
-            return image?.pngData(maxPixel: 640)
+            return image?.pngData(maxPixel: 640).map { PreparedMedia(hashing: $0) }
         }
 
         guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else {
@@ -199,7 +202,7 @@ enum LinkPreviewFetcher {
         let data = try await loadProviderData(provider)
         try Task.checkCancellation()
         guard let data, let image = NSImage(data: data) else { return nil }
-        return image.pngData(maxPixel: 640)
+        return image.pngData(maxPixel: 640).map { PreparedMedia(hashing: $0) }
     }
 
     private static func loadProviderObject(_ provider: NSItemProvider) async throws -> NSImage? {

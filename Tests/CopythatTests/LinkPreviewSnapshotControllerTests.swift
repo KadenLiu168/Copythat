@@ -116,6 +116,30 @@ struct LinkPreviewSnapshotControllerTests {
         #expect(driver.eventHandler == nil)
     }
 
+    @Test func deliveredSnapshotCarriesExactlyOneIdentityHash() async throws {
+        let counters = MediaOperationCounters()
+        let driver = makeDriver()
+        let controller = LinkPreviewSnapshotController(
+            driver: driver,
+            waitForDeadline: controlledDeadline
+        )
+
+        counters.reset()
+        async let result = counters.measure {
+            await controller.run(url: fixtureURL())
+        }
+        await counter.waitFor("load", reaching: 1)
+        driver.emit(.navigationDidFinish)
+        await counter.waitFor("snapshotSubmitted", reaching: 1)
+        driver.completeSnapshot(snapshotImage)
+        let media = try #require(await result)
+
+        #expect(media.id.count == 64)
+        #expect(!media.data.isEmpty)
+        #expect(counters.identityHashCount == 1)
+        #expect(counters.integrityHashCount == 0)
+    }
+
     @Test func navigationDeadlineAttemptsSnapshotOnceWithoutDidFinish() async {
         let driver = makeDriver()
         let controller = LinkPreviewSnapshotController(

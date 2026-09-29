@@ -425,8 +425,8 @@ private extension ClipboardCardView {
     private var mediaTaskIdentity: MediaTaskIdentity {
         MediaTaskIdentity(
             itemID: item.id,
-            imageBlobID: item.persistedImageBlobID,
-            linkImageBlobID: item.persistedLinkImageBlobID,
+            imageBlobID: item.imageBlobID,
+            linkImageBlobID: item.linkImageBlobID,
             imageData: item.imageData,
             linkImageData: item.linkImageData,
             eligible: panelVisible && !hidesPreview,

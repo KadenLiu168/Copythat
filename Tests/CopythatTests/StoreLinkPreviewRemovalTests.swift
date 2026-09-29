@@ -16,7 +16,7 @@ struct StoreLinkPreviewRemovalTests {
     }
 
     private func titleOnlyMetadataLoader() -> ClipboardStore.LinkMetadataLoader {
-        { _ in LinkPreviewMetadata(title: "Example", imageData: nil) }
+        { _ in LinkPreviewMetadata(title: "Example", image: nil) }
     }
 
     @Test func oldMetadataCompletionCannotClearReplacementRequest() async {
@@ -33,7 +33,7 @@ struct StoreLinkPreviewRemovalTests {
                 counter.mark("metadata")
                 let attempt = counter.value("metadata")
                 await (attempt == 1 ? oldGate : newGate).waitUntilReleased()
-                return LinkPreviewMetadata(title: "Current", imageData: nil)
+                return LinkPreviewMetadata(title: "Current", image: nil)
             },
             fetchLinkSnapshot: { _ in throw URLError(.badServerResponse) }
         )
@@ -68,7 +68,7 @@ struct StoreLinkPreviewRemovalTests {
         store.linkPreviewHandledObserver = { counter.mark("handled") }
         store.add(item)
         await counter.waitFor("metadata:pending", reaching: 1)
-        store.applyLinkPreview(itemID: item.id, title: "Existing", imageData: snapshotData)
+        store.applyLinkPreview(itemID: item.id, title: "Existing", linkImage: PreparedMedia(hashing: snapshotData))
         gate.release()
         await counter.waitFor("handled", reaching: 1)
         #expect(store.items.first?.linkImageData == snapshotData)
@@ -131,12 +131,12 @@ struct StoreLinkPreviewRemovalTests {
                         .lateAfterCancel(gate, then: .titleOnly("Late"))
                         .evaluate(counter: counter, key: removedURL)
                 }
-                return LinkPreviewMetadata(title: "Pinned", imageData: nil)
+                return LinkPreviewMetadata(title: "Pinned", image: nil)
             },
             fetchLinkSnapshot: { url in
                 counter.begin("snapshot:\(url.absoluteString)")
                 defer { counter.end("snapshot:\(url.absoluteString)") }
-                return snapshotData
+                return PreparedMedia(hashing: snapshotData)
             }
         )
         store.linkPreviewHandledObserver = { counter.mark("handled") }
@@ -173,7 +173,7 @@ struct StoreLinkPreviewRemovalTests {
             initialItems: [pinned] + fillers + [item],
             pasteboard: LinkPreviewFixture.uniquePasteboard(),
             persistItems: { recorder.record($0) },
-            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: nil, imageData: nil) },
+            fetchLinkMetadata: { _ in LinkPreviewMetadata(title: nil, image: nil) },
             fetchLinkSnapshot: LinkPreviewSnapshotScript.lateAfterCancel(gate, then: .image(snapshotData))
                 .loader(counter: counter, key: "removed")
         )
@@ -226,7 +226,7 @@ struct StoreLinkPreviewRemovalTests {
             persistItems: { recorder.record($0) },
             fetchLinkMetadata: { url in
                 metadataCounterCalls.mark("metadata:\(url.absoluteString)")
-                return LinkPreviewMetadata(title: "Example", imageData: nil)
+                return LinkPreviewMetadata(title: "Example", image: nil)
             },
             fetchLinkSnapshot: { _ in throw URLError(.badServerResponse) }
         )

@@ -49,7 +49,7 @@ struct ClipboardHistoryPolicyTests {
         let originalDate = Date(timeIntervalSince1970: 10)
         let unloaded = imageItem(
             data: nil,
-            persistedImageBlobID: sha256Hex(bytes),
+            imageBlobID: sha256Hex(bytes),
             sourceApp: "豆包",
             sourceAppIconData: Data([1, 2, 3]),
             createdAt: originalDate
@@ -62,7 +62,7 @@ struct ClipboardHistoryPolicyTests {
         #expect(result.items.map(\.id) == [unloaded.id, other.id])
         #expect(result.items[0].sourceApp == "豆包")
         #expect(result.items[0].createdAt == originalDate)
-        #expect(result.items[0].persistedImageBlobID == sha256Hex(bytes))
+        #expect(result.items[0].imageBlobID == sha256Hex(bytes))
         #expect(result.items[0].imageData == nil)
         #expect(result.selectedID == unloaded.id)
         #expect(result.insertedItem == nil)
@@ -70,7 +70,7 @@ struct ClipboardHistoryPolicyTests {
 
     @Test func pinnedUnloadedImageSurvivesNewDuplicateCapture() {
         let bytes = Data([31, 32, 33])
-        let pinned = imageItem(data: nil, persistedImageBlobID: sha256Hex(bytes), isPinned: true)
+        let pinned = imageItem(data: nil, imageBlobID: sha256Hex(bytes), isPinned: true)
         let captured = imageItem(data: bytes)
 
         let result = ClipboardHistoryPolicy.adding(captured, to: [pinned], limit: 10)
@@ -128,7 +128,7 @@ struct ClipboardHistoryPolicyTests {
 
     private func imageItem(
         data: Data?,
-        persistedImageBlobID: String? = nil,
+        imageBlobID: String? = nil,
         sourceApp: String = "Tests",
         sourceAppIconData: Data? = nil,
         createdAt: Date = Date(),
@@ -147,7 +147,7 @@ struct ClipboardHistoryPolicyTests {
             textValue: nil,
             fileURLs: [],
             imageData: data,
-            persistedImageBlobID: persistedImageBlobID
+            imageBlobID: imageBlobID
         )
     }
 

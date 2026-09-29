@@ -36,7 +36,7 @@ struct ClipboardImageDragCancellationTests {
             id: UUID(), kind: .image, title: "image", preview: "image",
             sourceApp: "Tests", sourceAppIconData: nil, createdAt: Date(),
             isPinned: false, pinboardName: nil, textValue: nil, fileURLs: [],
-            imageData: nil, persistedImageBlobID: blobID
+            imageData: nil, imageBlobID: blobID
         )
         let provider = ClipboardImageDragProvider.provider(for: item, mediaLoader: loader)
         let received = DragResultRecorder()

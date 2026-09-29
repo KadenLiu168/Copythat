@@ -160,7 +160,7 @@ private final class PasteMaterializationFixture {
             textValue: nil,
             fileURLs: [],
             imageData: nil,
-            persistedImageBlobID: blobID
+            imageBlobID: blobID
         )
     }
 
@@ -282,7 +282,7 @@ struct PanelPasteMaterializationTests {
         let materialized = try await store.materializedItemForPaste(item)
 
         #expect(materialized.imageData == bytes)
-        #expect(materialized.persistedImageBlobID == blobID)
+        #expect(materialized.imageBlobID == blobID)
         #expect(materialized.id == item.id)
         #expect(materialized.kind == item.kind)
         #expect(materialized.createdAt == item.createdAt)

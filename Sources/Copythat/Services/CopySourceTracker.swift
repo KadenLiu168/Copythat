@@ -6,12 +6,22 @@ import Foundation
 struct ClipboardSource {
     let appName: String
     let iconData: Data?
+    /// Content address of the icon bytes, established once when the icon is
+    /// encoded and forwarded with it afterwards.
+    let iconBlobID: String?
     let capturedAt: Date
     let pasteboardChangeCount: Int?
 
-    init(appName: String, iconData: Data?, capturedAt: Date, pasteboardChangeCount: Int? = nil) {
+    init(
+        appName: String,
+        iconData: Data?,
+        iconBlobID: String? = nil,
+        capturedAt: Date,
+        pasteboardChangeCount: Int? = nil
+    ) {
         self.appName = appName
         self.iconData = iconData
+        self.iconBlobID = iconData.map { iconBlobID ?? PreparedMedia(hashing: $0).id } ?? iconBlobID
         self.capturedAt = capturedAt
         self.pasteboardChangeCount = pasteboardChangeCount
     }
@@ -246,6 +256,7 @@ final class CopySourceTracker {
         return ClipboardSource(
             appName: previous.appName,
             iconData: previous.iconData,
+            iconBlobID: previous.iconBlobID,
             capturedAt: Date(),
             pasteboardChangeCount: observedChangeCount
         )
