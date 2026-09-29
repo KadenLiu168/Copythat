@@ -1,6 +1,49 @@
 import CryptoKit
 import Foundation
 
+/// Shared access to the persisted heavy-media blob directory. History
+/// persistence saves and restores through it, and the on-demand media loader
+/// reads through the same validation and SHA256 verification path so blob
+/// syntax rules exist in exactly one place.
+struct ClipboardHistoryBlobStore: @unchecked Sendable {
+    let directoryURL: URL
+    let readData: (URL) throws -> Data
+
+    /// Validates an ID and maps it to its blob URL without touching disk.
+    func blobURL(for blobID: String) throws -> URL {
+        guard Self.isCanonicalBlobID(blobID) else {
+            throw ClipboardHistoryPersistenceError.invalidBlob(blobID)
+        }
+        return directoryURL.appendingPathComponent("\(blobID).blob")
+    }
+
+    /// Reads a blob and verifies its SHA256 before releasing bytes.
+    func read(blobID: String) throws -> Data {
+        let data = try readData(try blobURL(for: blobID))
+        guard Self.sha256Hex(data) == blobID else {
+            throw ClipboardHistoryPersistenceError.invalidBlob(blobID)
+        }
+        return data
+    }
+
+    /// Exactly 64 lowercase ASCII hex characters. Unicode hex digits and
+    /// uppercase letters are rejected so an ID can only ever name a file
+    /// directly inside the media directory.
+    static func isCanonicalBlobID(_ blobID: String) -> Bool {
+        let bytes = blobID.utf8
+        guard bytes.count == 64 else { return false }
+        return bytes.allSatisfy { byte in
+            (byte >= 0x30 && byte <= 0x39) || (byte >= 0x61 && byte <= 0x66)
+        }
+    }
+
+    static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
 final class ClipboardHistoryPersistence: @unchecked Sendable {
     private static let legacyKey = "clipboardItems"
     private static let fileName = "clipboard-history.json"
@@ -13,6 +56,7 @@ final class ClipboardHistoryPersistence: @unchecked Sendable {
     private let writeData: (Data, URL) throws -> Void
     private let readData: (URL) throws -> Data
     private let removeItemAtURL: (URL) throws -> Void
+    private let blobs: ClipboardHistoryBlobStore
 
     init(
         directoryURL: URL,
@@ -30,6 +74,16 @@ final class ClipboardHistoryPersistence: @unchecked Sendable {
         self.readData = readData
         self.writeData = writeData
         removeItemAtURL = removeItem
+        blobs = ClipboardHistoryBlobStore(
+            directoryURL: directoryURL.appendingPathComponent(Self.mediaDirectoryName, isDirectory: true),
+            readData: readData
+        )
+    }
+
+    /// The shared blob access for the same media directory and reader this
+    /// persistence uses, so on-demand consumers read the exact stored bytes.
+    var blobStore: ClipboardHistoryBlobStore {
+        blobs
     }
 
     static var historyURL: URL {
@@ -81,12 +135,20 @@ final class ClipboardHistoryPersistence: @unchecked Sendable {
 
     func save(_ items: [ClipboardItem], garbageCollect: Bool = true) throws {
         var pendingBlobs: [String: Data] = [:]
-        let persistedItems = items.map { item in
+        let persistedItems = try items.map { item in
             PersistedClipboardItemV2(
                 item: item,
                 sourceAppIconBlob: blobID(for: item.sourceAppIconData, pendingBlobs: &pendingBlobs),
-                imageBlob: blobID(for: item.imageData, pendingBlobs: &pendingBlobs),
-                linkImageBlob: blobID(for: item.linkImageData, pendingBlobs: &pendingBlobs)
+                imageBlob: try blobID(
+                    for: item.imageData,
+                    persistedBlobID: item.persistedImageBlobID,
+                    pendingBlobs: &pendingBlobs
+                ),
+                linkImageBlob: try blobID(
+                    for: item.linkImageData,
+                    persistedBlobID: item.persistedLinkImageBlobID,
+                    pendingBlobs: &pendingBlobs
+                )
             )
         }
         try FileManager.default.createDirectory(
@@ -151,10 +213,15 @@ final class ClipboardHistoryPersistence: @unchecked Sendable {
             switch version {
             case 2:
                 let file = try JSONDecoder().decode(ClipboardHistoryFileV2.self, from: data)
-                var blobCache: [String: Data] = [:]
+                // Every reference is validated before any of them becomes a
+                // file path; heavy payloads are only read on demand later.
+                for persistedItem in file.items {
+                    try persistedItem.validateBlobReferences(in: blobs)
+                }
+                var iconCache: [String: Data] = [:]
                 return try file.items.map { persistedItem in
-                    try persistedItem.makeClipboardItem { blobID in
-                        try loadBlob(blobID, cache: &blobCache)
+                    try persistedItem.makeClipboardItem { iconBlobID in
+                        try loadBlob(iconBlobID, cache: &iconCache)
                     }
                 }
             case 1:
@@ -166,24 +233,36 @@ final class ClipboardHistoryPersistence: @unchecked Sendable {
         return try JSONDecoder().decode([ClipboardItem].self, from: data)
     }
 
+    /// Media bytes win. An item without resident bytes reuses its validated
+    /// reference without reading or hashing the referenced payload; an invalid
+    /// reference fails the save before any manifest or GC work starts.
+    private func blobID(
+        for data: Data?,
+        persistedBlobID: String?,
+        pendingBlobs: inout [String: Data]
+    ) throws -> String? {
+        if let data {
+            return blobID(for: data, pendingBlobs: &pendingBlobs)
+        }
+        guard let persistedBlobID else { return nil }
+        _ = try blobs.blobURL(for: persistedBlobID)
+        return persistedBlobID
+    }
+
     private func blobID(for data: Data?, pendingBlobs: inout [String: Data]) -> String? {
         guard let data else { return nil }
-        let blobID = SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
+        let blobID = ClipboardHistoryBlobStore.sha256Hex(data)
 
         if pendingBlobs[blobID] != nil { return blobID }
-        let blobURL = mediaDirectoryURL.appendingPathComponent("\(blobID).blob")
-        guard FileManager.default.fileExists(atPath: blobURL.path) else {
+        let blobURL = try? blobs.blobURL(for: blobID)
+        guard let blobURL, FileManager.default.fileExists(atPath: blobURL.path) else {
             pendingBlobs[blobID] = data
             return blobID
         }
 
-        if let existingData = try? readData(blobURL) {
-            let existingBlobID = SHA256.hash(data: existingData)
-                .map { String(format: "%02x", $0) }
-                .joined()
-            if existingBlobID == blobID { return blobID }
+        if let existingData = try? readData(blobURL),
+           ClipboardHistoryBlobStore.sha256Hex(existingData) == blobID {
+            return blobID
         }
 
         pendingBlobs[blobID] = data
@@ -192,19 +271,8 @@ final class ClipboardHistoryPersistence: @unchecked Sendable {
 
     private func loadBlob(_ blobID: String?, cache: inout [String: Data]) throws -> Data? {
         guard let blobID else { return nil }
-        guard blobID.count == 64,
-              blobID == blobID.lowercased(),
-              blobID.allSatisfy(\.isHexDigit) else {
-            throw ClipboardHistoryPersistenceError.invalidBlob(blobID)
-        }
         if let cached = cache[blobID] { return cached }
-        let data = try readData(mediaDirectoryURL.appendingPathComponent("\(blobID).blob"))
-        let actualID = SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
-        guard actualID == blobID else {
-            throw ClipboardHistoryPersistenceError.invalidBlob(blobID)
-        }
+        let data = try blobs.read(blobID: blobID)
         cache[blobID] = data
         return data
     }
@@ -270,22 +338,33 @@ private struct PersistedClipboardItemV2: Codable {
         self.linkImageBlob = linkImageBlob
     }
 
-    func makeClipboardItem(loadBlob: (String?) throws -> Data?) throws -> ClipboardItem {
+    /// Rejects a manifest whose references could not be used as file paths.
+    func validateBlobReferences(in blobStore: ClipboardHistoryBlobStore) throws {
+        for blobID in blobIDs {
+            _ = try blobStore.blobURL(for: blobID)
+        }
+    }
+
+    /// Source icons stay eager; heavy media is represented by its persisted
+    /// content address so restore does not read or hash it.
+    func makeClipboardItem(loadIcon: (String?) throws -> Data?) throws -> ClipboardItem {
         ClipboardItem(
             id: id,
             kind: kind,
             title: title,
             preview: preview,
             sourceApp: sourceApp,
-            sourceAppIconData: try loadBlob(sourceAppIconBlob),
+            sourceAppIconData: try loadIcon(sourceAppIconBlob),
             createdAt: createdAt,
             isPinned: isPinned,
             pinboardName: pinboardName,
             textValue: textValue,
             fileURLs: fileURLs,
-            imageData: try loadBlob(imageBlob),
+            imageData: nil,
             linkTitle: linkTitle,
-            linkImageData: try loadBlob(linkImageBlob)
+            linkImageData: nil,
+            persistedImageBlobID: imageBlob,
+            persistedLinkImageBlobID: linkImageBlob
         )
     }
 }

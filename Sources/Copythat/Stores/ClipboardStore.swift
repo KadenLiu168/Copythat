@@ -10,6 +10,10 @@ private struct PendingObservation {
     let firstObservedUptime: TimeInterval
 }
 
+enum ClipboardPasteMaterializationError: Error {
+    case undecodableImage
+}
+
 /// Registry for Store-owned link preview tasks so releasing the Store cancels
 /// remaining preview work. Entries are removed when their completion is handled;
 /// `cancelAll` is thread-safe so a nonisolated deinit can cancel stragglers.
@@ -62,6 +66,9 @@ final class ClipboardStore: ObservableObject {
     private let settings: AppSettings
     private let sourceTracker: CopySourceTracker
     let diagnostics: ClipboardDiagnostics
+    /// Shared on-demand media access for card display, paste materialization
+    /// and image drag, all reading the same persisted blob store.
+    let mediaLoader: ClipboardHistoryMediaLoader
     private let persistItems: ([ClipboardItem]) -> Void
     private var timer: Timer?
     private var pollTask: Task<Void, Never>?
@@ -85,7 +92,15 @@ final class ClipboardStore: ObservableObject {
     typealias LinkMetadataLoader = @Sendable (URL) async throws -> LinkPreviewMetadata
     typealias LinkSnapshotLoader = @Sendable (URL) async throws -> Data
 
-    private(set) var panelVisible = false
+    /// Observable read-only panel visibility. Cards use it to gate their lazy
+    /// media loading, so `close()` must publish even while the hosting view
+    /// stays retained.
+    @Published private(set) var panelVisible = false
+    /// Advances on every visibility transition. A card request captures the
+    /// generation it started under, so a close→reopen within one update cycle
+    /// still invalidates the older request even if SwiftUI never rendered the
+    /// hidden state.
+    private(set) var panelAuthorizationGeneration = 0
     let fetchLinkMetadata: LinkMetadataLoader
     let fetchLinkSnapshot: LinkSnapshotLoader
     var linkMetadataStates: [UUID: LinkMetadataState] = [:]
@@ -116,6 +131,7 @@ final class ClipboardStore: ObservableObject {
         initialItems: [ClipboardItem]? = nil,
         pasteboard: NSPasteboard = .general,
         diagnostics: ClipboardDiagnostics = ClipboardDiagnostics(),
+        mediaLoader: ClipboardHistoryMediaLoader = .shared,
         persistItems: @escaping ([ClipboardItem]) -> Void = ClipboardHistoryPersistence.save,
         uptimeProvider: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         fetchLinkMetadata: @escaping LinkMetadataLoader = { try await LinkPreviewFetcher.fetchMetadata(url: $0) },
@@ -128,6 +144,7 @@ final class ClipboardStore: ObservableObject {
         self.sourceTracker = sourceTracker
         self.pasteboard = pasteboard
         self.diagnostics = diagnostics
+        self.mediaLoader = mediaLoader
         self.persistItems = persistItems
         self.uptimeProvider = uptimeProvider
         self.fetchLinkMetadata = fetchLinkMetadata
@@ -167,6 +184,7 @@ final class ClipboardStore: ObservableObject {
     /// selected URL; metadata enrichment is independent of visibility.
     func panelDidOpen() {
         panelVisible = true
+        panelAuthorizationGeneration += 1
         if let selectedID {
             diagnostics.logLinkPreview(itemID: selectedID, outcome: .panelOpened, uptime: uptimeProvider())
         }
@@ -178,6 +196,7 @@ final class ClipboardStore: ObservableObject {
     /// fallback alive, and metadata enrichment continues.
     func panelDidClose() {
         panelVisible = false
+        panelAuthorizationGeneration += 1
         if let itemID = activeFallback?.request.target.itemID ?? selectedID {
             diagnostics.logLinkPreview(itemID: itemID, outcome: .panelClosed, uptime: uptimeProvider())
         }
@@ -443,6 +462,41 @@ extension ClipboardStore {
             saveItems()
             registerLinkMetadataIfNeeded(for: insertion.insertedItem)
         }
+    }
+
+    /// Returns an item ready for the existing pasteboard write path. Items
+    /// without persisted heavy media — text, URL, file, and items whose bytes
+    /// are already resident — return unchanged, so their path stays
+    /// synchronous. A persisted image is materialized into a temporary copy
+    /// that carries verified bytes and never mutates history.
+    func materializedItemForPaste(_ item: ClipboardItem) async throws -> ClipboardItem {
+        guard item.kind == .image,
+              item.imageData == nil,
+              let blobID = item.persistedImageBlobID else {
+            return item
+        }
+        let data = try await mediaLoader.load(blobID: blobID)
+        guard NSImage(data: data) != nil else {
+            throw ClipboardPasteMaterializationError.undecodableImage
+        }
+        return ClipboardItem(
+            id: item.id,
+            kind: item.kind,
+            title: item.title,
+            preview: item.preview,
+            sourceApp: item.sourceApp,
+            sourceAppIconData: item.sourceAppIconData,
+            createdAt: item.createdAt,
+            isPinned: item.isPinned,
+            pinboardName: item.pinboardName,
+            textValue: item.textValue,
+            fileURLs: item.fileURLs,
+            imageData: data,
+            linkTitle: item.linkTitle,
+            linkImageData: item.linkImageData,
+            persistedImageBlobID: item.persistedImageBlobID,
+            persistedLinkImageBlobID: item.persistedLinkImageBlobID
+        )
     }
 
     func writeToPasteboard(_ item: ClipboardItem) -> Bool {

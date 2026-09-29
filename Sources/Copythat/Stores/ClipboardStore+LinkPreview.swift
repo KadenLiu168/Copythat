@@ -85,7 +85,7 @@ extension ClipboardStore {
     private func visibleSelectedLinkURL() -> VisibleLinkURL? {
         guard panelVisible, let selectedID else { return nil }
         guard let item = filteredItems.first(where: { $0.id == selectedID }) else { return nil }
-        guard item.kind == .url, item.linkImageData == nil else { return nil }
+        guard item.kind == .url, !item.hasLinkImagePayload else { return nil }
         guard let url = previewURL(of: item) else { return nil }
         return VisibleLinkURL(item: item, target: LinkFallbackTarget(itemID: item.id, url: url))
     }
@@ -105,7 +105,7 @@ extension ClipboardStore {
         guard let item = insertedItem,
               item.kind == .url,
               items.contains(where: { $0.id == item.id }),
-              item.linkImageData == nil,
+              !item.hasLinkImagePayload,
               linkMetadataStates[item.id] == nil,
               metadataTasks[item.id] == nil,
               let url = previewURL(of: item) else {
@@ -193,17 +193,23 @@ extension ClipboardStore {
 
     private func applyLinkMetadata(itemID: UUID, index: Int, metadata: LinkPreviewMetadata) {
         let existing = items[index]
-        let mergedImage = existing.linkImageData ?? metadata.imageData
-        linkMetadataStates[itemID] = mergedImage == nil ? .successWithoutImage : .successWithImage
+        // A payload the item already has — resident or still persisted — keeps
+        // its identity; nil metadata bytes must not overwrite an unloaded
+        // preview, and neither outcome is classified as image-less. Only an
+        // item without any payload accepts new metadata bytes.
+        let replacementImage = existing.hasLinkImagePayload ? nil : metadata.imageData
+        linkMetadataStates[itemID] = existing.hasLinkImagePayload || metadata.imageData != nil
+            ? .successWithImage
+            : .successWithoutImage
         let mergedTitle = metadata.title ?? existing.linkTitle
-        guard mergedTitle != existing.linkTitle || mergedImage != existing.linkImageData else {
+        guard mergedTitle != existing.linkTitle || replacementImage != nil else {
             // Empty metadata success: eligible for fallback, and empty results
             // clear neither title nor image, producing no update or save.
             return
         }
 
         updateItem(at: index) {
-            $0.withLinkPreview(title: mergedTitle, linkImageData: mergedImage).storageOptimized
+            $0.withLinkPreview(title: mergedTitle, linkImageData: replacementImage).storageOptimized
         }
         refreshFilteredItems()
         saveItems()
@@ -314,7 +320,7 @@ extension ClipboardStore {
               let item = filteredItems.first(where: { $0.id == target.itemID }),
               item.kind == .url,
               previewURL(of: item) == target.url,
-              item.linkImageData == nil,
+              !item.hasLinkImagePayload,
               linkMetadataStates[item.id] == .successWithoutImage else {
             return .discard
         }

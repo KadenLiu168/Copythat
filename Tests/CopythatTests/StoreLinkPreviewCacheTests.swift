@@ -59,6 +59,19 @@ struct StoreLinkPreviewCacheTests {
         await counter.waitFor("handled", reaching: 5)
         #expect(counter.value("snapshot:loader") == 2)
         #expect(store.snapshotPositiveCache.count == 2)
+
+        AcceptanceMetrics.record(
+            scenario: "link-preview-regression",
+            metric: "snapshotLoaderRunsForCacheHitAndQueryVariant",
+            expected: "2",
+            observed: "\(counter.value("snapshot:loader"))"
+        )
+        AcceptanceMetrics.record(
+            scenario: "link-preview-regression",
+            metric: "sessionCacheEntries",
+            expected: "2",
+            observed: "\(store.snapshotPositiveCache.count)"
+        )
     }
 
     // Case 8: positive cache stays bounded at 64 entries.

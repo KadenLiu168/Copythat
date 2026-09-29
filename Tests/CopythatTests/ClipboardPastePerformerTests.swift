@@ -413,6 +413,52 @@ struct ClipboardPastePerformerTests {
         #expect(fixture.seams.commandVCount == 0)
     }
 
+    /// A newer request that must wait for media materialization supersedes the
+    /// older attempt at request entry, before any handoff exists. Its stale
+    /// activation and fallback callbacks must not reach Command-V.
+    @Test func lazyRequestEntrySupersedesPendingAttemptBeforeMaterializing() {
+        let fixture = Fixture()
+        let performer = fixture.makePerformer()
+
+        performer.beginPasteAttempt(to: .current)
+        #expect(fixture.seams.fallbackBlocks.count == 1)
+
+        // The controller's request entry point, called while the newer item's
+        // media is still loading.
+        performer.supersedePendingAttempt()
+
+        fixture.seams.activateLatestApp(pid: fixture.targetPID)
+        fixture.seams.fireLatestFallback()
+        fixture.seams.runAllQueuedSends()
+
+        #expect(fixture.seams.commandVCount == 0)
+        #expect(fixture.seams.observerRemovals == 1)
+        #expect(fixture.seams.fallbackCancels == 1)
+        #expect(fixture.store.permissionMessage == nil)
+    }
+
+    /// The same boundary after the older attempt already queued its deferred
+    /// delivery: superseding at request entry invalidates it.
+    @Test func lazyRequestEntrySupersedesQueuedSendBeforeMaterializing() {
+        let fixture = Fixture()
+        let performer = fixture.makePerformer()
+
+        performer.beginPasteAttempt(to: .current)
+        fixture.seams.activateLatestApp(pid: fixture.targetPID)
+        #expect(fixture.seams.queuedSends.count == 1)
+
+        performer.supersedePendingAttempt()
+        fixture.seams.runAllQueuedSends()
+
+        #expect(fixture.seams.commandVCount == 0)
+        AcceptanceMetrics.record(
+            scenario: "paste-performer-regression",
+            metric: "commandVSendsFromSupersededQueuedSend",
+            expected: "0",
+            observed: "\(fixture.seams.commandVCount)"
+        )
+    }
+
     // MARK: - Release cleanup (1.3)
 
     @Test func releasedPerformerCleansUpPendingAttempt() {

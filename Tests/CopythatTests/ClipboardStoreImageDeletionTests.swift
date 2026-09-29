@@ -1,5 +1,6 @@
 @testable import Copythat
 import AppKit
+import CryptoKit
 import Foundation
 import Testing
 
@@ -68,6 +69,69 @@ struct ClipboardStoreImageDeletionTests {
         #expect(pasteboard.types?.isEmpty ?? true)
     }
 
+    @Test func removingUnloadedImageBlocksSameBytesRecapture() throws {
+        let pasteboard = NSPasteboard.withUniqueName()
+        let image = solidImage(color: .systemRed)
+        let probeStore = store(items: [], pasteboard: pasteboard)
+        let imageData = try #require(probeStore.normalizedImageData(for: image))
+        let unloaded = unloadedImageItem(blobID: sha256Hex(imageData))
+        let store = store(items: [unloaded], pasteboard: pasteboard)
+
+        store.remove(unloaded)
+
+        #expect(store.items.isEmpty)
+        #expect(store.hasDeletedContentKey(unloaded.contentKey))
+        let recaptured = imageItem(data: imageData)
+        #expect(recaptured.contentKey == unloaded.contentKey)
+        #expect(!store.shouldInsertEncodedItem(recaptured))
+        AcceptanceMetrics.record(
+            scenario: "model-deletion-policy",
+            metric: "recaptureBlockedForSameBytes",
+            expected: "true",
+            observed: "\(!store.shouldInsertEncodedItem(recaptured))"
+        )
+    }
+
+    @Test func deletingCurrentUnloadedImageClearsPasteboardWithoutLoadingBlob() throws {
+        let pasteboard = NSPasteboard.withUniqueName()
+        let image = solidImage(color: .systemBlue)
+        let probeStore = store(items: [], pasteboard: pasteboard)
+        let imageData = try #require(probeStore.normalizedImageData(for: image))
+        // The reference names no file on disk: a deletion path that tried to
+        // materialize history media could not match the current pasteboard.
+        let unloaded = unloadedImageItem(blobID: sha256Hex(imageData))
+        let store = store(items: [unloaded], pasteboard: pasteboard)
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+
+        store.remove(unloaded)
+
+        #expect(store.items.isEmpty)
+        #expect(pasteboard.types?.isEmpty ?? true)
+        AcceptanceMetrics.record(
+            scenario: "model-deletion-policy",
+            metric: "pasteboardClearedForCurrentLazyImage",
+            expected: "true",
+            observed: "\(pasteboard.types?.isEmpty ?? true)"
+        )
+    }
+
+    @Test func distinctCopyIsCapturableAfterUnloadedImageDeletion() throws {
+        let pasteboard = NSPasteboard.withUniqueName()
+        let image = solidImage(color: .systemGreen)
+        let probeStore = store(items: [], pasteboard: pasteboard)
+        let imageData = try #require(probeStore.normalizedImageData(for: image))
+        let unloaded = unloadedImageItem(blobID: sha256Hex(imageData))
+        let store = store(items: [unloaded], pasteboard: pasteboard)
+
+        store.remove(unloaded)
+
+        let distinct = imageItem(data: Data([99, 98, 97]))
+        #expect(store.shouldInsertEncodedItem(distinct))
+        store.add(distinct)
+        #expect(store.items.map(\.id) == [distinct.id])
+    }
+
     @Test func deletingOlderItemDoesNotClearCurrentPasteboard() {
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
@@ -105,6 +169,30 @@ struct ClipboardStoreImageDeletionTests {
             fileURLs: [],
             imageData: data
         )
+    }
+
+    private func unloadedImageItem(blobID: String) -> ClipboardItem {
+        ClipboardItem(
+            id: UUID(),
+            kind: .image,
+            title: "Image",
+            preview: "10 x 10",
+            sourceApp: "Tests",
+            sourceAppIconData: nil,
+            createdAt: Date(),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: nil,
+            fileURLs: [],
+            imageData: nil,
+            persistedImageBlobID: blobID
+        )
+    }
+
+    private func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private func textItem(_ text: String) -> ClipboardItem {

@@ -322,6 +322,19 @@ struct ClipboardHistoryWorkerIntegrationTests {
         #expect(!manifestText.contains(icon.base64EncodedString()))
         #expect(!manifestText.contains(linkPreview.base64EncodedString()))
         #expect(try persistence.loadItems().first?.isPinned == true)
+
+        AcceptanceMetrics.record(
+            scenario: "history-worker-commit",
+            metric: "blobWritesOnMetadataMutation",
+            expected: "0",
+            observed: "\(latestProbe.blobNames.count)"
+        )
+        AcceptanceMetrics.record(
+            scenario: "history-worker-commit",
+            metric: "workerWritesOnMainThread",
+            expected: "0",
+            observed: "\(latestProbe.writesOnMainThread.filter { $0 }.count)"
+        )
     }
 
     private func historyItem(_ value: String) -> ClipboardItem {

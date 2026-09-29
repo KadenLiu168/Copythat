@@ -34,6 +34,7 @@ build_driver() {
     Sources/Copythat/Support/ClipboardDiagnostics.swift
     Sources/Copythat/Support/ClipboardHistoryPersistence.swift
     Sources/Copythat/Support/ClipboardHistoryPolicy.swift
+    Sources/Copythat/Support/ClipboardHistoryMediaLoader.swift
     Sources/Copythat/Support/CopySourceResolution.swift
     Sources/Copythat/Support/LinkPreviewFetcher.swift
     Sources/Copythat/Support/LinkPreviewSnapshotController.swift

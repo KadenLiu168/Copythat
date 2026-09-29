@@ -9,10 +9,18 @@ private actor DiscardHistorySaves: ClipboardHistorySaving {
 
 @MainActor
 func isolatedAppModel(coordinator: ClipboardHistorySaveCoordinator? = nil) -> AppModel {
-    AppModel(
+    let mediaDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("IsolatedAppModel-\(UUID().uuidString)/history-media", isDirectory: true)
+    return AppModel(
         historySaveCoordinator: coordinator ?? ClipboardHistorySaveCoordinator(worker: DiscardHistorySaves()),
         pasteboard: NSPasteboard.withUniqueName(),
-        settings: isolatedAppSettings(), initialItems: []
+        settings: isolatedAppSettings(), initialItems: [],
+        mediaLoader: ClipboardHistoryMediaLoader(
+            blobStore: ClipboardHistoryBlobStore(
+                directoryURL: mediaDirectory,
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
     )
 }
 

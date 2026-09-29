@@ -35,7 +35,8 @@ final class AppModel: ObservableObject {
                     worker: ClipboardHistorySaveWorker(persistence: persistence)
                 ),
                 pasteboard: NSPasteboard(name: NSPasteboard.Name(name)),
-                settings: AppSettings(defaults: defaults), initialItems: []
+                settings: AppSettings(defaults: defaults), initialItems: [],
+                mediaLoader: ClipboardHistoryMediaLoader(blobStore: persistence.blobStore)
             )
             return
         }
@@ -50,7 +51,8 @@ final class AppModel: ObservableObject {
         historySaveCoordinator: ClipboardHistorySaveCoordinator,
         pasteboard: NSPasteboard = .general,
         settings: AppSettings? = nil,
-        initialItems: [ClipboardItem]? = nil
+        initialItems: [ClipboardItem]? = nil,
+        mediaLoader: ClipboardHistoryMediaLoader = .shared
     ) {
         let settings = settings ?? AppSettings()
         let sourceTracker = CopySourceTracker()
@@ -62,6 +64,7 @@ final class AppModel: ObservableObject {
             sourceTracker: sourceTracker,
             initialItems: initialItems,
             pasteboard: pasteboard,
+            mediaLoader: mediaLoader,
             persistItems: { historySaveCoordinator.requestSave($0) }
         )
         self.store = store

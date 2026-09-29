@@ -43,6 +43,13 @@ struct AppModelWiringTests {
 
         #expect(await coordinator.flush())
         #expect(await worker.recordedSnapshots().last?.contains(sentinel) == true)
+        let snapshotContainsMutation = await worker.recordedSnapshots().last?.contains(sentinel) == true
+        AcceptanceMetrics.record(
+            scenario: "app-model-wiring",
+            metric: "coordinatorSnapshotContainsStoreMutation",
+            expected: "true",
+            observed: "\(snapshotContainsMutation)"
+        )
     }
 
     @Test func trackerWakeReachesStoreAndStartsOrExtendsTheStoreBurst() async {

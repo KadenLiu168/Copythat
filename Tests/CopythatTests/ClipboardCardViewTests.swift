@@ -3,6 +3,7 @@ import AppKit
 import SwiftUI
 import Testing
 
+@MainActor
 struct ClipboardCardViewTests {
     @Test func textCardsUseTheirOwnCapturedSourceIcons() throws {
         let redCard = card(text: "First text", icon: solidIcon(red: 0.92, green: 0.16, blue: 0.12))
@@ -23,6 +24,10 @@ struct ClipboardCardViewTests {
             pinboards: [],
             isSelected: false,
             hidesPreview: false,
+            panelVisible: false,
+            authorizationGeneration: 0,
+            mediaLoader: Self.mediaLoader,
+            store: Self.store,
             onSelect: {},
             onPaste: {},
             onTogglePin: {},
@@ -50,6 +55,10 @@ struct ClipboardCardViewTests {
             pinboards: [],
             isSelected: false,
             hidesPreview: false,
+            panelVisible: false,
+            authorizationGeneration: 0,
+            mediaLoader: Self.mediaLoader,
+            store: Self.store,
             onSelect: {},
             onPaste: {},
             onTogglePin: {},
@@ -104,6 +113,10 @@ struct ClipboardCardViewTests {
             pinboards: [],
             isSelected: false,
             hidesPreview: hidesPreview,
+            panelVisible: false,
+            authorizationGeneration: 0,
+            mediaLoader: Self.mediaLoader,
+            store: Self.store,
             onSelect: {},
             onPaste: {},
             onTogglePin: {},
@@ -111,6 +124,30 @@ struct ClipboardCardViewTests {
             onDelete: {}
         )
     }
+
+    /// Isolated store and loader shared by the card fixtures; these tests never
+    /// touch persisted history.
+    private static let store: ClipboardStore = {
+        let suiteName = "ClipboardCardViewTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return ClipboardStore(
+            settings: AppSettings(defaults: defaults),
+            sourceTracker: CopySourceTracker(),
+            initialItems: [],
+            pasteboard: NSPasteboard.withUniqueName(),
+            mediaLoader: mediaLoader,
+            persistItems: { _ in }
+        )
+    }()
+
+    private static let mediaLoader = ClipboardHistoryMediaLoader(
+        blobStore: ClipboardHistoryBlobStore(
+            directoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("ClipboardCardViewTests-\(UUID().uuidString)/history-media", isDirectory: true),
+            readData: { try Data(contentsOf: $0) }
+        )
+    )
 
     private func item(text: String, iconData: Data?) -> ClipboardItem {
         ClipboardItem(

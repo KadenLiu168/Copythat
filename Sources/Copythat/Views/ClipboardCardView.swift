@@ -14,17 +14,62 @@ struct ClipboardCardView: View, Equatable {
     let pinboards: [CustomPinboard]
     let isSelected: Bool
     let hidesPreview: Bool
+    let panelVisible: Bool
+    let authorizationGeneration: Int
+    let mediaLoader: ClipboardHistoryMediaLoader
+    /// Read (never mutated) at completion time so a late result checks the
+    /// current authorization instead of the value captured when its task ran.
+    let store: ClipboardStore
     let onSelect: () -> Void
     let onPaste: () -> Void
     let onTogglePin: () -> Void
     let onMoveToPinboard: (String?) -> Void
     let onDelete: () -> Void
 
+    /// View-owned, short-lived media for the persisted payload this card is
+    /// currently displaying. Released whenever the card leaves the eligible
+    /// display path so retained cards cannot accumulate browsed images.
+    @StateObject private var mediaState: ClipboardCardMediaState
+
+    init(
+        item: ClipboardItem,
+        pinboards: [CustomPinboard],
+        isSelected: Bool,
+        hidesPreview: Bool,
+        panelVisible: Bool,
+        authorizationGeneration: Int,
+        mediaLoader: ClipboardHistoryMediaLoader,
+        store: ClipboardStore,
+        mediaState: ClipboardCardMediaState? = nil,
+        onSelect: @escaping () -> Void,
+        onPaste: @escaping () -> Void,
+        onTogglePin: @escaping () -> Void,
+        onMoveToPinboard: @escaping (String?) -> Void,
+        onDelete: @escaping () -> Void
+    ) {
+        self.item = item
+        self.pinboards = pinboards
+        self.isSelected = isSelected
+        self.hidesPreview = hidesPreview
+        self.panelVisible = panelVisible
+        self.authorizationGeneration = authorizationGeneration
+        self.mediaLoader = mediaLoader
+        self.store = store
+        self.onSelect = onSelect
+        self.onPaste = onPaste
+        self.onTogglePin = onTogglePin
+        self.onMoveToPinboard = onMoveToPinboard
+        self.onDelete = onDelete
+        _mediaState = StateObject(wrappedValue: mediaState ?? ClipboardCardMediaState())
+    }
+
     static func == (lhs: ClipboardCardView, rhs: ClipboardCardView) -> Bool {
         lhs.item == rhs.item &&
             lhs.pinboards == rhs.pinboards &&
             lhs.isSelected == rhs.isSelected &&
-            lhs.hidesPreview == rhs.hidesPreview
+            lhs.hidesPreview == rhs.hidesPreview &&
+            lhs.panelVisible == rhs.panelVisible &&
+            lhs.authorizationGeneration == rhs.authorizationGeneration
     }
 
     var body: some View {
@@ -75,6 +120,12 @@ struct ClipboardCardView: View, Equatable {
             Button("Delete", role: .destructive, action: onDelete)
         }
         .onDrag { dragProvider(for: item) }
+        .task(id: mediaTaskIdentity) {
+            await loadMediaIfEligible()
+        }
+        .onDisappear {
+            mediaState.release()
+        }
     }
 
     private var headerSection: some View {
@@ -150,7 +201,7 @@ struct ClipboardCardView: View, Equatable {
 
     @ViewBuilder
     private var imagePreview: some View {
-        if let image = item.image {
+        if let image = item.image ?? mediaState.image {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFit()
@@ -165,6 +216,8 @@ struct ClipboardCardView: View, Equatable {
                         .foregroundStyle(.white)
                         .padding(.bottom, 10)
                 }
+        } else if item.hasImagePayload, !mediaState.imageLoadFailed {
+            mediaPlaceholder
         } else {
             fallbackPreview
                 .padding(16)
@@ -174,20 +227,15 @@ struct ClipboardCardView: View, Equatable {
 
     private var linkPreview: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let image = item.linkImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(height: 105)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
+            if item.hasLinkImagePayload {
+                linkImageRegion
             }
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(linkDisplayTitle)
-                    .font(CopythatFont.font(size: item.linkImage == nil ? 19 : 16, weight: .semibold))
+                    .font(CopythatFont.font(size: item.hasLinkImagePayload ? 16 : 19, weight: .semibold))
                     .foregroundStyle(primaryText)
-                    .lineLimit(item.linkImage == nil ? 3 : 2)
+                    .lineLimit(item.hasLinkImagePayload ? 2 : 3)
                     .lineSpacing(1)
 
                 Text(linkDisplayURL)
@@ -196,7 +244,7 @@ struct ClipboardCardView: View, Equatable {
                     .lineLimit(2)
             }
             .padding(.horizontal, 15)
-            .padding(.top, item.linkImage == nil ? 22 : 10)
+            .padding(.top, item.hasLinkImagePayload ? 10 : 22)
             .padding(.bottom, 13)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -305,7 +353,7 @@ struct ClipboardCardView: View, Equatable {
     }
 
     private var imageDetail: String {
-        guard let image = item.image else { return item.preview }
+        guard let image = item.image ?? mediaState.image else { return item.preview }
         let width = Int(image.size.width.rounded())
         let height = Int(image.size.height.rounded())
         guard width > 0, height > 0 else { return item.preview }
@@ -336,14 +384,11 @@ struct ClipboardCardView: View, Equatable {
         Color(red: 0.49, green: 0.47, blue: 0.44)
     }
 
-    private func dragProvider(for item: ClipboardItem) -> NSItemProvider {
+    func dragProvider(for item: ClipboardItem) -> NSItemProvider {
         if let url = item.fileURLs.first {
             return NSItemProvider(object: url as NSURL)
         }
-        if let image = item.image {
-            return NSItemProvider(object: image)
-        }
-        return NSItemProvider(object: (item.textValue ?? item.preview) as NSString)
+        return ClipboardImageDragProvider.provider(for: item, mediaLoader: mediaLoader)
     }
 
     private func selectForClick() {
@@ -361,6 +406,81 @@ struct ClipboardCardView: View, Equatable {
 
     var sourceLogoIdentity: String {
         "\(item.id.uuidString):\(sourceIconIdentity)"
+    }
+}
+
+private extension ClipboardCardView {
+    // MARK: - On-demand media
+
+    private struct MediaTaskIdentity: Hashable {
+        let itemID: UUID
+        let imageBlobID: String?
+        let linkImageBlobID: String?
+        let imageData: Data?
+        let linkImageData: Data?
+        let eligible: Bool
+        let authorizationGeneration: Int
+    }
+
+    private var mediaTaskIdentity: MediaTaskIdentity {
+        MediaTaskIdentity(
+            itemID: item.id,
+            imageBlobID: item.persistedImageBlobID,
+            linkImageBlobID: item.persistedLinkImageBlobID,
+            imageData: item.imageData,
+            linkImageData: item.linkImageData,
+            eligible: panelVisible && !hidesPreview,
+            authorizationGeneration: authorizationGeneration
+        )
+    }
+
+    private var isMediaEligible: Bool {
+        panelVisible && !hidesPreview
+    }
+
+    private func loadMediaIfEligible() async {
+        await mediaState.load(
+            item: item,
+            mediaLoader: mediaLoader,
+            isEligible: isMediaEligible,
+            isAuthorized: {
+                // Reads live state: a completion is rejected when the panel is
+                // hidden or belongs to an older authorization generation, even
+                // if SwiftUI never rendered the hidden state in between.
+                self.store.panelVisible
+                    && self.store.panelAuthorizationGeneration == self.authorizationGeneration
+                    && !self.hidesPreview
+            }
+        )
+    }
+
+    /// The reserved 105pt preview region exists whenever a payload does, so
+    /// completion never reflows the card between text-only and image layouts.
+    private var linkImageRegion: some View {
+        ZStack {
+            if let image = item.linkImage ?? mediaState.linkImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else if mediaState.linkImageLoadFailed {
+                Color.black.opacity(0.05)
+                Image(systemName: "photo")
+                    .font(CopythatFont.font(size: 22, weight: .semibold))
+                    .foregroundStyle(secondaryText)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+        .frame(height: 105)
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+
+    private var mediaPlaceholder: some View {
+        ProgressView()
+            .controlSize(.small)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

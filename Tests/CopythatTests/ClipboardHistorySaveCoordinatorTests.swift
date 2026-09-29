@@ -123,6 +123,21 @@ struct ClipboardHistorySaveCoordinatorTests {
             RecordedHistoryCommit(generation: 4, text: "generation-4")
         ])
         #expect(await worker.garbageCollectionGenerations == [4])
+
+        let committedGenerations = await worker.commits.map(\.generation)
+        let collectedGenerations = await worker.garbageCollectionGenerations
+        AcceptanceMetrics.record(
+            scenario: "history-save-coordinator",
+            metric: "committedGenerationsForRapidRequests",
+            expected: "[1, 4]",
+            observed: "\(committedGenerations)"
+        )
+        AcceptanceMetrics.record(
+            scenario: "history-save-coordinator",
+            metric: "garbageCollectionAfterLatestCommit",
+            expected: "[4]",
+            observed: "\(collectedGenerations)"
+        )
     }
 
     @Test func latestFailedGenerationCanBeRetriedAndFlushReportsFailure() async {

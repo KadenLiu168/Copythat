@@ -109,6 +109,12 @@ struct AppDelegateTerminationTests {
         #expect(state.committedGenerations == [1, 3])
         #expect(state.committedText == "latest")
         #expect(choices.isEmpty)
+        AcceptanceMetrics.record(
+            scenario: "termination-flush",
+            metric: "committedGenerationsAtQuitAfterRetry",
+            expected: "[1, 3]",
+            observed: "\(state.committedGenerations)"
+        )
     }
 
     @Test func quitAnywayKeepsPreviouslyCommittedHistory() async {

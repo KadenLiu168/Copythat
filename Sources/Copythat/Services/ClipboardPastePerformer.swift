@@ -35,6 +35,7 @@ final class ClipboardPastePerformer {
     private let requestActivation: (NSRunningApplication) -> Void
     private let scheduleFallback: (TimeInterval, @escaping @MainActor () -> Void) -> () -> Void
     private let scheduleSend: (@escaping @MainActor () -> Void) -> Void
+    private let isAccessibilityTrusted: () -> Bool
     private let sendCommandV: () -> Void
 
     private struct PendingAttempt {
@@ -55,6 +56,7 @@ final class ClipboardPastePerformer {
         requestActivation: @escaping (NSRunningApplication) -> Void = { $0.activate(options: [.activateAllWindows]) },
         scheduleFallback: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> () -> Void = ClipboardPastePerformer.defaultScheduleFallback,
         scheduleSend: @escaping (@escaping @MainActor () -> Void) -> Void = ClipboardPastePerformer.defaultScheduleSend,
+        isAccessibilityTrusted: @escaping () -> Bool = AccessibilityService.requestIfNeeded,
         sendCommandV: @escaping () -> Void = ClipboardPastePerformer.defaultSendCommandV
     ) {
         self.store = store
@@ -63,6 +65,7 @@ final class ClipboardPastePerformer {
         self.requestActivation = requestActivation
         self.scheduleFallback = scheduleFallback
         self.scheduleSend = scheduleSend
+        self.isAccessibilityTrusted = isAccessibilityTrusted
         self.sendCommandV = sendCommandV
     }
 
@@ -71,7 +74,7 @@ final class ClipboardPastePerformer {
         store.clearPermissionMessage()
         let didWrite = store.writeToPasteboard(item)
         let hasTargetApp = targetApp != nil
-        let accessibilityTrusted = didWrite && hasTargetApp && AccessibilityService.requestIfNeeded()
+        let accessibilityTrusted = didWrite && hasTargetApp && isAccessibilityTrusted()
 
         switch pasteDecision(
             didWrite: didWrite,
@@ -148,7 +151,10 @@ final class ClipboardPastePerformer {
         }
     }
 
-    private func supersedePendingAttempt() {
+    /// Cancels any pending activation/fallback coordination without sending.
+    /// A new paste request calls this as it starts, so an attempt queued by an
+    /// older request cannot fire while the newer one still materializes media.
+    func supersedePendingAttempt() {
         attemptGeneration += 1
         guard let attempt = pendingAttempt else { return }
         pendingAttempt = nil

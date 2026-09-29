@@ -6,30 +6,39 @@ import Testing
 struct PasteTargetTests {
     @Test func excludesCopythatAndSystemProcessesButAcceptsUserApps() {
         let copythatBundleIdentifier = "local.copythat.clipboard"
+        let outcomes = [
+            PanelWindowController.isPasteTargetCandidate(
+                processIdentifier: 100,
+                currentProcessIdentifier: 100,
+                bundleIdentifier: "com.example.other",
+                copythatBundleIdentifier: copythatBundleIdentifier
+            ),
+            PanelWindowController.isPasteTargetCandidate(
+                processIdentifier: 200,
+                currentProcessIdentifier: 100,
+                bundleIdentifier: copythatBundleIdentifier,
+                copythatBundleIdentifier: copythatBundleIdentifier
+            ),
+            PanelWindowController.isPasteTargetCandidate(
+                processIdentifier: 300,
+                currentProcessIdentifier: 100,
+                bundleIdentifier: "com.apple.systemuiserver",
+                copythatBundleIdentifier: copythatBundleIdentifier
+            ),
+            PanelWindowController.isPasteTargetCandidate(
+                processIdentifier: 400,
+                currentProcessIdentifier: 100,
+                bundleIdentifier: "com.apple.TextEdit",
+                copythatBundleIdentifier: copythatBundleIdentifier
+            )
+        ]
 
-        #expect(!PanelWindowController.isPasteTargetCandidate(
-            processIdentifier: 100,
-            currentProcessIdentifier: 100,
-            bundleIdentifier: "com.example.other",
-            copythatBundleIdentifier: copythatBundleIdentifier
-        ))
-        #expect(!PanelWindowController.isPasteTargetCandidate(
-            processIdentifier: 200,
-            currentProcessIdentifier: 100,
-            bundleIdentifier: copythatBundleIdentifier,
-            copythatBundleIdentifier: copythatBundleIdentifier
-        ))
-        #expect(!PanelWindowController.isPasteTargetCandidate(
-            processIdentifier: 300,
-            currentProcessIdentifier: 100,
-            bundleIdentifier: "com.apple.systemuiserver",
-            copythatBundleIdentifier: copythatBundleIdentifier
-        ))
-        #expect(PanelWindowController.isPasteTargetCandidate(
-            processIdentifier: 400,
-            currentProcessIdentifier: 100,
-            bundleIdentifier: "com.apple.TextEdit",
-            copythatBundleIdentifier: copythatBundleIdentifier
-        ))
+        #expect(outcomes == [false, false, false, true])
+        AcceptanceMetrics.record(
+            scenario: "paste-target-resolution",
+            metric: "candidateDecisionsSelfCopythatSystemUser",
+            expected: "[false, false, false, true]",
+            observed: "\(outcomes)"
+        )
     }
 }

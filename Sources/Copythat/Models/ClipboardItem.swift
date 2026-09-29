@@ -42,6 +42,11 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     let imageData: Data?
     let linkTitle: String?
     let linkImageData: Data?
+    /// Content address of the persisted image blob backing `imageData`.
+    /// Retained while V2 history restores heavy media without reading it, so
+    /// identity and persistence survive without resident bytes.
+    let persistedImageBlobID: String?
+    let persistedLinkImageBlobID: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -74,7 +79,9 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         fileURLs: [URL],
         imageData: Data?,
         linkTitle: String? = nil,
-        linkImageData: Data? = nil
+        linkImageData: Data? = nil,
+        persistedImageBlobID: String? = nil,
+        persistedLinkImageBlobID: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -90,6 +97,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         self.imageData = imageData
         self.linkTitle = linkTitle
         self.linkImageData = linkImageData
+        self.persistedImageBlobID = persistedImageBlobID
+        self.persistedLinkImageBlobID = persistedLinkImageBlobID
     }
 
     init(from decoder: Decoder) throws {
@@ -108,6 +117,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
         linkTitle = try container.decodeIfPresent(String.self, forKey: .linkTitle)
         linkImageData = try container.decodeIfPresent(Data.self, forKey: .linkImageData)
+        persistedImageBlobID = nil
+        persistedLinkImageBlobID = nil
     }
 
     var searchText: String {
@@ -128,6 +139,16 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         linkImageData.flatMap(NSImage.init(data:))
     }
 
+    /// Whether an image payload exists, whether resident or still on disk.
+    var hasImagePayload: Bool {
+        imageData != nil || persistedImageBlobID != nil
+    }
+
+    /// Whether a link-preview image payload exists, resident or still on disk.
+    var hasLinkImagePayload: Bool {
+        linkImageData != nil || persistedLinkImageBlobID != nil
+    }
+
     var contentKey: String {
         switch kind {
         case .text, .url:
@@ -135,12 +156,20 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         case .file:
             return "file:\(fileURLs.map(\.path).joined(separator: "|"))"
         case .image:
-            return "image:\(imageData?.stableDigest ?? "empty")"
+            if let imageData {
+                return "image:\(imageData.stableDigest)"
+            }
+            if let persistedImageBlobID {
+                return "image:\(persistedImageBlobID)"
+            }
+            return "image:empty"
         }
     }
 
     var storageOptimized: ClipboardItem {
-        ClipboardItem(
+        let optimizedImageData = imageData == nil ? nil : image?.pngData(maxPixel: 1_200)
+        let optimizedLinkImageData = linkImageData == nil ? nil : linkImage?.pngData(maxPixel: 640)
+        return ClipboardItem(
             id: id,
             kind: kind,
             title: title,
@@ -152,9 +181,19 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
             pinboardName: pinboardName,
             textValue: textValue,
             fileURLs: fileURLs,
-            imageData: imageData == nil ? nil : image?.pngData(maxPixel: 1_200),
+            imageData: optimizedImageData,
             linkTitle: linkTitle,
-            linkImageData: linkImageData == nil ? nil : linkImage?.pngData(maxPixel: 640)
+            linkImageData: optimizedLinkImageData,
+            persistedImageBlobID: persistedReference(
+                persistedImageBlobID,
+                original: imageData,
+                optimized: optimizedImageData
+            ),
+            persistedLinkImageBlobID: persistedReference(
+                persistedLinkImageBlobID,
+                original: linkImageData,
+                optimized: optimizedLinkImageData
+            )
         )
     }
 
@@ -173,8 +212,17 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
             fileURLs: fileURLs,
             imageData: imageData,
             linkTitle: title,
-            linkImageData: linkImageData
+            linkImageData: linkImageData ?? self.linkImageData,
+            persistedImageBlobID: persistedImageBlobID,
+            persistedLinkImageBlobID: linkImageData == nil ? persistedLinkImageBlobID : nil
         )
+    }
+
+    /// A reference stays valid only while the bytes it addresses are unchanged.
+    private func persistedReference(_ blobID: String?, original: Data?, optimized: Data?) -> String? {
+        guard let original else { return blobID }
+        guard let optimized, optimized == original else { return nil }
+        return blobID
     }
 }
 

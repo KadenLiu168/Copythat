@@ -1,10 +1,126 @@
 @testable import Copythat
 import AppKit
+import CryptoKit
 import Foundation
 import Testing
 
 @MainActor
 struct ClipboardHistoryPerformanceTests {
+    @Test func versionTwoRestoreOfMediaHeavyHistoryReadsNoHeavyBlobs() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HistoryMediaPerformance-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "ClipboardHistoryPerformanceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        var blobReads: [String] = []
+        let persistence = ClipboardHistoryPersistence(
+            directoryURL: directory,
+            userDefaults: defaults,
+            readData: { url in
+                blobReads.append(url.lastPathComponent)
+                return try Data(contentsOf: url)
+            }
+        )
+        // Four distinct source icons shared across 500 items: restore must
+        // deduplicate them while never touching the per-item heavy payloads.
+        let icons = (0..<4).map { Data(repeating: UInt8(0x40 + $0), count: 96) }
+        var items: [ClipboardItem] = []
+        items.reserveCapacity(500)
+        var heavyBlobIDs: Set<String> = []
+        for index in 0..<500 {
+            let icon = icons[index % icons.count]
+            let media = Data(
+                [UInt8(index >> 8), UInt8(index & 0xFF)] + [UInt8](repeating: 0x5A, count: 62)
+            )
+            heavyBlobIDs.insert(Self.sha256Hex(media))
+            if index.isMultiple(of: 2) {
+                items.append(
+                    ClipboardItem(
+                        id: UUID(),
+                        kind: .image,
+                        title: "Image \(index)",
+                        preview: "64 x 64",
+                        sourceApp: "Preview",
+                        sourceAppIconData: icon,
+                        createdAt: Date(timeIntervalSince1970: TimeInterval(-index)),
+                        isPinned: false,
+                        pinboardName: nil,
+                        textValue: nil,
+                        fileURLs: [],
+                        imageData: media
+                    )
+                )
+            } else {
+                let url = "https://media.example.com/item/\(index)"
+                items.append(
+                    ClipboardItem(
+                        id: UUID(),
+                        kind: .url,
+                        title: "media.example.com",
+                        preview: url,
+                        sourceApp: "Safari",
+                        sourceAppIconData: icon,
+                        createdAt: Date(timeIntervalSince1970: TimeInterval(-index)),
+                        isPinned: false,
+                        pinboardName: nil,
+                        textValue: url,
+                        fileURLs: [],
+                        imageData: nil,
+                        linkTitle: "Item \(index)",
+                        linkImageData: media
+                    )
+                )
+            }
+        }
+        try persistence.save(items)
+        blobReads.removeAll()
+
+        let restored = try persistence.loadItems()
+
+        #expect(restored.count == 500)
+        #expect(blobReads.filter { $0 == "clipboard-history.json" }.count == 1)
+        let iconReads = blobReads.filter { $0.hasSuffix(".blob") }
+        #expect(iconReads.count == 4, "shared source icons are read once each")
+        #expect(iconReads.allSatisfy { !heavyBlobIDs.contains(String($0.dropLast(5))) })
+        #expect(restored.allSatisfy { $0.imageData == nil && $0.linkImageData == nil })
+        #expect(restored.filter { $0.persistedImageBlobID != nil }.count == 250)
+        #expect(restored.filter { $0.persistedLinkImageBlobID != nil }.count == 250)
+        #expect(restored.allSatisfy { $0.sourceAppIconData != nil })
+        #expect(restored.map(\.contentKey) == items.map(\.contentKey))
+
+        // Metadata is searchable and pinboard-ready before any media access.
+        let store = ClipboardStore(
+            settings: AppSettings(defaults: defaults),
+            sourceTracker: CopySourceTracker(),
+            initialItems: restored,
+            pasteboard: NSPasteboard.withUniqueName(),
+            persistItems: { _ in }
+        )
+        #expect(store.filteredItems.count == 500)
+        store.searchText = "Item 499"
+        #expect(store.filteredItems.count == 1)
+        store.searchText = ""
+        let restoredBlobReads = blobReads.filter { $0.hasSuffix(".blob") }
+        #expect(restoredBlobReads.count == 4)
+
+        AcceptanceMetrics.record(
+            scenario: "history-performance-read-counters",
+            metric: "heavyBlobReadsFor500ItemRestore",
+            expected: "0",
+            observed: "\(restoredBlobReads.filter { heavyBlobIDs.contains(String($0.dropLast(5))) }.count)"
+        )
+        AcceptanceMetrics.record(
+            scenario: "history-performance-read-counters",
+            metric: "sourceIconBlobReads",
+            expected: "4 (deduplicated)",
+            observed: "\(restoredBlobReads.count)"
+        )
+    }
+
     @Test func productionHistoryEncodingAndFilteringHandleFiveThousandItems() throws {
         let now = Date(timeIntervalSince1970: 0)
         var items: [ClipboardItem] = []
@@ -65,5 +181,11 @@ struct ClipboardHistoryPerformanceTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 }

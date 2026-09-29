@@ -6,12 +6,22 @@ import SwiftUI
 final class PanelWindowController {
     private let model: AppModel
     private let pastePerformer: ClipboardPastePerformer
-    private var panel: CopythatPanel?
-    private var targetApp: NSRunningApplication?
+    /// Exposed read-only so tests can drive the panel's real gesture and key
+    /// handlers instead of re-implementing the routing.
+    private(set) var panel: CopythatPanel?
+    private(set) var targetApp: NSRunningApplication?
+    /// Deterministic paste target for tests, including the `nil` (no target)
+    /// case. Production leaves this unset and resolves the frontmost
+    /// application in `show()`.
+    var pasteTargetOverride: NSRunningApplication?
+    /// At most one pending materialization; a newer paste request supersedes it
+    /// and only the newest completion may hand off to the performer.
+    private var pendingPasteTask: Task<Void, Never>?
+    private var pasteRequestToken = 0
 
-    init(model: AppModel) {
+    init(model: AppModel, pastePerformer: ClipboardPastePerformer? = nil) {
         self.model = model
-        pastePerformer = ClipboardPastePerformer(store: model.store)
+        self.pastePerformer = pastePerformer ?? ClipboardPastePerformer(store: model.store)
     }
 
     func toggle() {
@@ -23,8 +33,10 @@ final class PanelWindowController {
     }
 
     func show() {
-        if let frontmostApplication = NSWorkspace.shared.frontmostApplication,
-           isPasteTargetCandidate(frontmostApplication) {
+        if let pasteTargetOverride {
+            targetApp = pasteTargetOverride
+        } else if let frontmostApplication = NSWorkspace.shared.frontmostApplication,
+                  isPasteTargetCandidate(frontmostApplication) {
             targetApp = frontmostApplication
         }
         model.store.clearPermissionMessage()
@@ -43,14 +55,62 @@ final class PanelWindowController {
 
     func close() {
         // Revoke fallback eligibility and cancel active fallback work before the
-        // window is ordered out; NSHostingView stays alive either way.
+        // window is ordered out; NSHostingView stays alive either way. A paste
+        // that already handed off has cleared its pending ownership, so this
+        // never cancels an accepted performer attempt.
+        pendingPasteTask?.cancel()
+        pendingPasteTask = nil
         model.store.panelDidClose()
         panel?.orderOut(nil)
     }
 
     private func pasteSelected() {
+        pasteRequestToken += 1
+        let token = pasteRequestToken
+        pendingPasteTask?.cancel()
+        pendingPasteTask = nil
+        // Supersede any older queued performer attempt immediately: the newer
+        // request may wait for media before it can hand off.
+        pastePerformer.supersedePendingAttempt()
+
         guard let selected = model.store.selectedItem else { return }
-        if pastePerformer.paste(selected, into: targetApp) {
+        let targetApp = self.targetApp
+
+        guard needsMediaMaterialization(selected) else {
+            handOffPaste(selected, targetApp: targetApp)
+            return
+        }
+
+        let store = model.store
+        pendingPasteTask = Task { @MainActor [weak self] in
+            let materialized: ClipboardItem?
+            do {
+                materialized = try await store.materializedItemForPaste(selected)
+            } catch {
+                materialized = nil
+            }
+            guard !Task.isCancelled,
+                  let self,
+                  self.pasteRequestToken == token,
+                  store.panelVisible else {
+                return
+            }
+            self.pendingPasteTask = nil
+            guard let materialized else {
+                // Current failure keeps the panel open with the existing message.
+                store.permissionMessage = "This clipboard item could not be restored."
+                return
+            }
+            self.handOffPaste(materialized, targetApp: targetApp)
+        }
+    }
+
+    private func needsMediaMaterialization(_ item: ClipboardItem) -> Bool {
+        item.kind == .image && item.imageData == nil && item.persistedImageBlobID != nil
+    }
+
+    private func handOffPaste(_ item: ClipboardItem, targetApp: NSRunningApplication?) {
+        if pastePerformer.paste(item, into: targetApp) {
             close()
         }
     }

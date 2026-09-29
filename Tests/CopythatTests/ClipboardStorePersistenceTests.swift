@@ -1,6 +1,7 @@
 // Link preview seam
 @testable import Copythat
 import AppKit
+import CryptoKit
 import Foundation
 import Testing
 
@@ -43,6 +44,29 @@ private actor StorePersistenceRecorder: ClipboardHistorySaving {
 
     func recordedSaves() -> [RecordedStoreSave] {
         saves
+    }
+}
+
+private final class BlobReadRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var names: [String] = []
+
+    func record(_ url: URL) {
+        lock.lock()
+        names.append(url.lastPathComponent)
+        lock.unlock()
+    }
+
+    func reset() {
+        lock.lock()
+        names.removeAll()
+        lock.unlock()
+    }
+
+    func blobReads() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return names.filter { $0.hasSuffix(".blob") }
     }
 }
 
@@ -173,8 +197,13 @@ struct ClipboardStorePersistenceTests {
         #expect(item.textValue == original.textValue)
         #expect(item.sourceApp == original.sourceApp)
         #expect(item.linkTitle == "Searchable preview title")
-        #expect(item.linkImageData == png)
-        #expect(NSImage(data: try #require(item.linkImageData))?.size == NSSize(width: 32, height: 32))
+        #expect(item.linkImageData == nil)
+        #expect(item.persistedLinkImageBlobID == sha256Hex(png))
+        let materializedPreview = try reader.blobStore.read(
+            blobID: try #require(item.persistedLinkImageBlobID)
+        )
+        #expect(materializedPreview == png)
+        #expect(NSImage(data: materializedPreview)?.size == NSSize(width: 32, height: 32))
         #expect(item.isPinned)
         #expect(item.pinboardName == "Work")
         restored.searchText = "Searchable preview"
@@ -194,6 +223,192 @@ struct ClipboardStorePersistenceTests {
         #expect(restored.filteredItems.isEmpty)
         #expect(restored.selectedID == nil)
         restored.panelDidClose()
+    }
+
+    @Test func metadataMutationsPreserveUnloadedMediaReferencesWithoutHeavyReads() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LazyMetadata-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "ClipboardStorePersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let reads = BlobReadRecorder()
+        let persistence = ClipboardHistoryPersistence(
+            directoryURL: directory,
+            userDefaults: defaults,
+            readData: { url in
+                reads.record(url)
+                return try Data(contentsOf: url)
+            }
+        )
+        let imageBytes = Data(repeating: 0xc1, count: 4_096)
+        let linkImageBytes = Data(repeating: 0xc2, count: 2_048)
+        let urlItem = ClipboardItem(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000000c1")!,
+            kind: .url,
+            title: "Restored link",
+            preview: "https://restored.example.com/",
+            sourceApp: "Safari",
+            sourceAppIconData: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_200),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: "https://restored.example.com/",
+            fileURLs: [],
+            imageData: nil,
+            linkTitle: "Restored link",
+            linkImageData: linkImageBytes
+        )
+        let imageItem = ClipboardItem(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000000c2")!,
+            kind: .image,
+            title: "Restored image",
+            preview: "64 x 64",
+            sourceApp: "Preview",
+            sourceAppIconData: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_201),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: nil,
+            fileURLs: [],
+            imageData: imageBytes
+        )
+        try persistence.save([urlItem, imageItem])
+        reads.reset()
+
+        let restored = try persistence.loadItems()
+        #expect(restored.allSatisfy { $0.imageData == nil && $0.linkImageData == nil })
+
+        let coordinator = ClipboardHistorySaveCoordinator(
+            worker: ClipboardHistorySaveWorker(persistence: persistence)
+        )
+        let store = ClipboardStore(
+            settings: AppSettings(defaults: defaults),
+            sourceTracker: CopySourceTracker(),
+            initialItems: restored,
+            pasteboard: NSPasteboard.withUniqueName(),
+            persistItems: { coordinator.requestSave($0) }
+        )
+        let restoredImage = try #require(store.items.first { $0.id == imageItem.id })
+        let restoredURL = try #require(store.items.first { $0.id == urlItem.id })
+
+        store.togglePin(restoredImage)
+        store.move(restoredURL, toPinboard: "Work")
+        store.add(textItem("00000000-0000-0000-0000-0000000000c3", text: "unrelated"))
+        store.renamePinboardAssignments(from: "Work", to: "Ideas")
+        // The quit path flushes the same coordinator before replying to
+        // termination, so a successful flush here proves the snapshot carries
+        // unloaded references all the way to disk.
+        #expect(await coordinator.flush())
+
+        #expect(reads.blobReads().isEmpty)
+        let reloaded = try persistence.loadItems()
+        let reloadedURL = try #require(reloaded.first { $0.id == urlItem.id })
+        #expect(reloadedURL.linkImageData == nil)
+        #expect(reloadedURL.persistedLinkImageBlobID == sha256Hex(linkImageBytes))
+        #expect(reloadedURL.linkTitle == "Restored link")
+        #expect(reloadedURL.pinboardName == "Ideas")
+        let reloadedImage = try #require(reloaded.first { $0.id == imageItem.id })
+        #expect(reloadedImage.imageData == nil)
+        #expect(reloadedImage.persistedImageBlobID == sha256Hex(imageBytes))
+        #expect(reloadedImage.isPinned)
+        #expect(reloaded.contains { $0.textValue == "unrelated" })
+
+        AcceptanceMetrics.record(
+            scenario: "history-gc-and-mutations",
+            metric: "heavyBlobReadsAcrossMetadataMutations",
+            expected: "0",
+            observed: "\(reads.blobReads().count)"
+        )
+        AcceptanceMetrics.record(
+            scenario: "history-gc-and-mutations",
+            metric: "heavyReferencesPreservedAfterFlush",
+            expected: "2",
+            observed: "\([reloadedURL.persistedLinkImageBlobID != nil, reloadedImage.persistedImageBlobID != nil].filter { $0 }.count)"
+        )
+    }
+
+    @Test func deletingARestoredItemWithoutDisplayingItNeverReadsOrKeepsItsMedia() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeleteUnseen-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "ClipboardStorePersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let reads = BlobReadRecorder()
+        let persistence = ClipboardHistoryPersistence(
+            directoryURL: directory,
+            userDefaults: defaults,
+            readData: { url in
+                reads.record(url)
+                return try Data(contentsOf: url)
+            }
+        )
+        let imageBytes = Data(repeating: 0xd1, count: 2_048)
+        let item = ClipboardItem(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000000e1")!,
+            kind: .image,
+            title: "Unseen image",
+            preview: "64 x 64",
+            sourceApp: "Preview",
+            sourceAppIconData: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_210),
+            isPinned: false,
+            pinboardName: nil,
+            textValue: nil,
+            fileURLs: [],
+            imageData: imageBytes
+        )
+        try persistence.save([item])
+        reads.reset()
+
+        let restored = try persistence.loadItems()
+        #expect(restored.first?.imageData == nil)
+        #expect(restored.first?.persistedImageBlobID == sha256Hex(imageBytes))
+
+        let coordinator = ClipboardHistorySaveCoordinator(
+            worker: ClipboardHistorySaveWorker(persistence: persistence)
+        )
+        let store = ClipboardStore(
+            settings: AppSettings(defaults: defaults),
+            sourceTracker: CopySourceTracker(),
+            initialItems: restored,
+            pasteboard: NSPasteboard.withUniqueName(),
+            persistItems: { coordinator.requestSave($0) }
+        )
+        let restoredItem = try #require(store.items.first)
+
+        // Deleted before it was ever displayed or materialized.
+        store.remove(restoredItem)
+        #expect(await coordinator.flush())
+
+        #expect(reads.blobReads().isEmpty)
+        #expect(try persistence.loadItems().isEmpty)
+        let mediaDirectory = directory.appendingPathComponent("history-media", isDirectory: true)
+        let remaining = try FileManager.default.contentsOfDirectory(
+            at: mediaDirectory,
+            includingPropertiesForKeys: nil
+        )
+        #expect(remaining.isEmpty, "its blob is collected only after the new manifest commits")
+
+        AcceptanceMetrics.record(
+            scenario: "history-gc-and-mutations",
+            metric: "blobReadsForDeleteWithoutDisplay",
+            expected: "0",
+            observed: "\(reads.blobReads().count)"
+        )
+        AcceptanceMetrics.record(
+            scenario: "history-gc-and-mutations",
+            metric: "blobsRemainingAfterGC",
+            expected: "0",
+            observed: "\(remaining.count)"
+        )
     }
 
     @Test func rapidMutationsAndPreviewArrivalCommitOnlyLatestSnapshot() async throws {
@@ -339,6 +554,12 @@ struct ClipboardStorePersistenceTests {
         #expect(store.clearHistory(includePinnedAndPinboardItems: true) == 3)
         #expect(await coordinator.flush())
         #expect(await worker.recordedSaves().last?.items.isEmpty == true)
+    }
+
+    private func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private func urlItemForPersistence(
