@@ -13,8 +13,13 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Copythat",
+            exclude: [
+                "Resources/AppIcon.icns",
+                "Resources/AppIcon-transparent.png",
+                "Resources/Assets.xcassets"
+            ],
             resources: [
-                .process("Resources")
+                .process("Resources/MenuBarIconTemplate.png")
             ]
         ),
         .testTarget(
