@@ -4,6 +4,24 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Tracked text must not record machine-local home paths. git grep reports
+# matches on exit 0, no matches on exit 1, and any other status means the gate
+# itself could not run.
+home_root="/Users"
+home_path_pattern="${home_root}/[A-Za-z0-9._-]+/"
+home_path_status=0
+home_path_matches="$(git grep -nIE "$home_path_pattern" -- .)" || home_path_status=$?
+
+if [ "$home_path_status" -eq 0 ]; then
+    printf 'Tracked files must not contain absolute home-directory paths:\n%s\n' "$home_path_matches"
+    exit 1
+fi
+
+if [ "$home_path_status" -ne 1 ]; then
+    printf 'Home-directory path gate failed to run: git grep exited with status %s\n' "$home_path_status" >&2
+    exit "$home_path_status"
+fi
+
 ./script/verify/openspec_artifact_hygiene.sh
 ./script/verify/openspec_artifact_hygiene_test.sh
 

@@ -212,7 +212,14 @@ Ephemeral, never commit:
 Rules:
 
 * Report the conclusions of a verification or review in the agent response.
-* Keep detailed evidence in `.build/` or `/tmp/`; both are ignored.
+* Keep detailed evidence in `.build/verification/` or outside the repository.
+  Raw gate output, exit-code files, environment or toolchain snapshots,
+  per-file SHA-256 manifests, live event dumps and other raw evidence belong
+  there; an ignored `openspec/changes/**/evidence/` directory is only a
+  fallback.
+* Reference files inside the repository with repository-relative paths, and
+  locations outside it with `$HOME`, `/tmp/` or `<repository-root>`
+  placeholders. Never commit machine-specific home paths.
 * Route durable findings to the artifact that owns them: specs for behavior,
   proposal/design for decisions and tradeoffs, tasks for obligations, and
   `docs/` for long-lived procedures no spec owns.

@@ -30,9 +30,11 @@ struct ClipboardDiagnosticsTests {
     @Test func contentSummaryDoesNotExposeRawURLOrFilePathPayloads() {
         let url = "https://example.com/private/path?token=secret"
         let urlSummary = ClipboardDiagnostics.contentSummary(for: urlItem(url))
-        let fileURL = URL(fileURLWithPath: "/Users/kaden/private/secret.txt")
+        let filePath = ["/Users", "example", "private", "secret.txt"].joined(separator: "/")
+        let fileURL = URL(fileURLWithPath: filePath)
         let fileSummary = ClipboardDiagnostics.contentSummary(for: fileItem(fileURL))
 
+        #expect(fileURL.pathComponents == ["/", "Users", "example", "private", "secret.txt"])
         #expect(urlSummary.contentLength == url.count)
         #expect(!urlSummary.contentKeyDigest.contains("example"))
         #expect(!urlSummary.contentKeyDigest.contains("secret"))
@@ -158,13 +160,16 @@ struct ClipboardDiagnosticsTests {
             resolutionSlot: "shortcut"
         )
         let serialized = try event.jsonLine()
+        let decoded = try JSONSerialization.jsonObject(with: Data(serialized.utf8))
+        let object = try #require(decoded as? [String: Any])
+        let expectedKeys: Set<String> = ["event", "uptime", "changeCount", "sourceApp", "resolutionSlot"]
 
-        #expect(serialized.contains("source_resolved"))
-        #expect(serialized.contains("Google Chrome"))
-        #expect(serialized.contains("12.5"))
-        #expect(!serialized.contains("secret-marker-123"))
-        #expect(!serialized.contains("https://example.com/private"))
-        #expect(!serialized.contains("/Users/kaden/private.txt"))
+        #expect(Set(object.keys) == expectedKeys)
+        #expect(object["event"] as? String == "source_resolved")
+        #expect(object["uptime"] as? Double == 12.5)
+        #expect(object["changeCount"] as? Int == 99)
+        #expect(object["sourceApp"] as? String == "Google Chrome")
+        #expect(object["resolutionSlot"] as? String == "shortcut")
     }
 
     private func textItem(

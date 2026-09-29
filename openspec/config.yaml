@@ -23,3 +23,12 @@ rules:
   tasks:
     - Include verification steps for each implementation task.
     - Implementation changes should be verified with swift build and ./script/verify_all.sh unless the task is documentation-only.
+    - Keep raw evidence such as gate output, exit codes, environment or
+      toolchain snapshots, digests and live event dumps in
+      .build/verification/ or outside the repository; an ignored
+      openspec/changes/**/evidence/ directory is only a fallback. Do not
+      commit standalone verification conclusions, even human-written ones;
+      report them in the agent response.
+    - Reference files inside the repository with repository-relative paths,
+      and locations outside it with $HOME, /tmp/ or <repository-root>
+      placeholders; never commit machine-specific home-directory paths.
