@@ -1,5 +1,7 @@
 # Verification: fix-source-attribution-timing
 
+> 归档说明：本 Change 的原始验证附件（环境快照、gate 输出与 exit code、源码 SHA-256 清单、live 事件 JSONL）已从仓库移除，因为它们包含本机绝对路径、工具链版本和本机工作区状态。下文引用的 `evidence/` 文件不再是仓库内容，验证结论以本文件为准。
+
 ## Automated gate
 
 - Final relevant code/test/script changes were followed by `./script/verify_all.sh`.

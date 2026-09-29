@@ -32,7 +32,7 @@ Alternative considered: require an Apple signing identity. This is unnecessary f
 
 ### Decision: Keep the staged app path and bundle identifier stable
 
-The script should continue producing `/Users/kaden/Copythat/dist/Copythat.app` with the existing bundle identifier. A stable signing identity works best when paired with a stable app path and bundle ID during manual Accessibility testing.
+The script should continue producing `<repository-root>/dist/Copythat.app` with the existing bundle identifier. A stable signing identity works best when paired with a stable app path and bundle ID during manual Accessibility testing.
 
 Alternative considered: run the SwiftPM binary directly. That would avoid bundle rebuilds but would not match the menu bar app bundle and permission surface being tested.
 

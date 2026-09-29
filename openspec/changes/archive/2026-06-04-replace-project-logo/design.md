@@ -2,7 +2,7 @@
 
 Copythat currently bundles app icon resources under `Sources/Copythat/Resources/`, including `Assets.xcassets/AppIcon.appiconset`, `AppIcon.iconset`, `AppIcon.icns`, `AppIcon-1024.png`, `AppIcon-transparent.png`, and `MenuBarIconTemplate.png`. The existing `script/generate_icons.py` draws the old red C mark procedurally, so simply replacing generated PNG outputs would be fragile because a later icon regeneration would restore the old mark.
 
-The new logo source is `/Users/kaden/Copythat/script/assets/Copythat.png`, a 1254 x 1254 PNG. The implementation should treat that file as the source artwork for regenerated app branding assets.
+The new logo source is `script/assets/Copythat.png` in the repository root, a 1254 x 1254 PNG. The implementation should treat that file as the source artwork for regenerated app branding assets.
 
 ## Goals / Non-Goals
 

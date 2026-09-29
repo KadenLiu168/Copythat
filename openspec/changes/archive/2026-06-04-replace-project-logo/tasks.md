@@ -1,6 +1,6 @@
 ## 1. Source Artwork and Generator
 
-- [x] 1.1 Confirm `/Users/kaden/Copythat/script/assets/Copythat.png` is present, square, and readable as the new source logo; verify image metadata reports a square PNG.
+- [x] 1.1 Confirm `script/assets/Copythat.png` in the repository root is present, square, and readable as the new source logo; verify image metadata reports a square PNG.
 - [x] 1.2 Update `script/generate_icons.py` so app branding assets are generated from `script/assets/Copythat.png` instead of the old procedurally drawn red C mark; verify the script still writes the existing resource filenames.
 - [x] 1.3 Preserve or regenerate `MenuBarIconTemplate.png` as a monochrome template asset suitable for the macOS menu bar; verify it remains readable as a template icon and does not use the full-color app icon directly.
 

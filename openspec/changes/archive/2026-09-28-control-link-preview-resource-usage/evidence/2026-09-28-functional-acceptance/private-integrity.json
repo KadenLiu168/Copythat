@@ -1,5 +1,0 @@
-{
-  "unchanged": true,
-  "assertion": "Private history tree, preferences plist and exported application defaults hashes unchanged across final acceptance runs; no contents logged.",
-  "boundaries": "Baseline was taken after the first isolated support tests, before live/full gates. TCC was not reset. This does not compare external system TCC state."
-}

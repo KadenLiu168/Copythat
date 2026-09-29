@@ -4,7 +4,7 @@ The project now has a newer Copythat logo, and the app should present that ident
 
 ## What Changes
 
-- Use `/Users/kaden/Copythat/script/assets/Copythat.png` as the source artwork for the Copythat application logo.
+- Use `script/assets/Copythat.png` in the repository root as the source artwork for the Copythat application logo.
 - Regenerate the bundled app icon PNG sizes, `.icns`, and transparent logo resource from the new artwork.
 - Keep the existing menu bar template icon behavior unless it is directly generated from the old logo and must be refreshed to avoid stale branding.
 - Verify generated icon assets meet the project icon size and transparency checks.
