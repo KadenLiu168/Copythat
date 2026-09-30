@@ -257,6 +257,7 @@ build_driver() {
     log "compiling driver"
     local sources=(
         Sources/Copythat/Models/ClipboardItem.swift
+        Sources/Copythat/Models/PreparedMedia.swift
         Sources/Copythat/Support/ClipboardDiagnostics.swift
         Sources/Copythat/Support/ClipboardHistoryPersistence.swift
         Sources/Copythat/Support/ClipboardHistoryPolicy.swift
@@ -266,9 +267,12 @@ build_driver() {
         Sources/Copythat/Support/LinkPreviewSnapshotController.swift
         Sources/Copythat/Support/NSImage+PasteData.swift
         Sources/Copythat/Support/String+Truncate.swift
+        Sources/Copythat/Support/ClipboardHistorySaveCoordinator.swift
+        Sources/Copythat/Support/ClipboardHistorySaveWorker.swift
         Sources/Copythat/Stores/AppSettings.swift
         Sources/Copythat/Stores/ClipboardStore.swift
         Sources/Copythat/Stores/ClipboardStore+LinkPreview.swift
+        Sources/Copythat/Stores/ClipboardStore+DurableMediaRelease.swift
         Sources/Copythat/Stores/Pinboard.swift
         Sources/Copythat/Services/CopySourceTracker.swift
         "$DRIVER_SOURCE"
