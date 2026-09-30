@@ -363,12 +363,14 @@ extension ClipboardCardLazyMediaTests {
         ])
         store.panelDidOpen()
         let (hosting, window) = fixture.host(
-            fixture.card(
-                item: store.items[0],
-                store: store,
-                panelVisible: true,
-                authorizationGeneration: store.panelAuthorizationGeneration,
-                mediaState: state
+            EquatableCardHost(
+                card: fixture.card(
+                    item: store.items[0],
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: store.panelAuthorizationGeneration,
+                    mediaState: state
+                )
             )
         )
         defer { fixture.dismiss(window) }
@@ -376,12 +378,14 @@ extension ClipboardCardLazyMediaTests {
 
         // Same item ID, different media reference: the identity change must
         // invalidate the first request.
-        hosting.rootView = fixture.card(
-            item: fixture.imageItem(id: itemID, blobID: secondBlobID),
-            store: store,
-            panelVisible: true,
-            authorizationGeneration: store.panelAuthorizationGeneration,
-            mediaState: state
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: fixture.imageItem(id: itemID, blobID: secondBlobID),
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: store.panelAuthorizationGeneration,
+                mediaState: state
+            )
         )
         // Let the reference replacement supersede the pending request before the
         // superseded read is released: the loader serializes reads, so which of
@@ -461,12 +465,14 @@ extension ClipboardCardLazyMediaTests {
         let store = fixture.makeStore(items: [fixture.imageItem(id: itemID, blobID: blobID)])
         store.panelDidOpen()
         let (hosting, window) = fixture.host(
-            fixture.card(
-                item: store.items[0],
-                store: store,
-                panelVisible: true,
-                authorizationGeneration: store.panelAuthorizationGeneration,
-                mediaState: state
+            EquatableCardHost(
+                card: fixture.card(
+                    item: store.items[0],
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: store.panelAuthorizationGeneration,
+                    mediaState: state
+                )
             )
         )
         defer { fixture.dismiss(window) }
@@ -474,17 +480,250 @@ extension ClipboardCardLazyMediaTests {
 
         // Same item ID, but the persisted reference is replaced by resident
         // bytes, so the earlier request can no longer apply.
-        hosting.rootView = fixture.card(
-            item: fixture.imageItem(id: itemID, inlineData: inlineBytes),
-            store: store,
-            panelVisible: true,
-            authorizationGeneration: store.panelAuthorizationGeneration,
-            mediaState: state
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: fixture.imageItem(id: itemID, inlineData: inlineBytes),
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: store.panelAuthorizationGeneration,
+                mediaState: state
+            )
         )
         fixture.reader.releaseFirstRead()
         await fixture.settle()
         #expect(state.image == nil)
         #expect(!state.imageLoadFailed)
+    }
+    @Test func residentBytesReplacedByOtherResidentBytesDisplayTheCurrentPayload() async throws {
+        let fixture = try CardMediaFixture(blockFirstRead: true)
+        defer { fixture.cleanUp() }
+        let firstBytes = try #require(CardMediaFixture.imagePNG(red: true))
+        let secondBytes = try #require(CardMediaFixture.imagePNG(red: false))
+        _ = fixture.writeBlob(firstBytes)
+        _ = fixture.writeBlob(secondBytes)
+        let itemID = UUID()
+        let residentA = fixture.imageItem(id: itemID, inlineData: firstBytes)
+        let residentB = fixture.imageItem(id: itemID, inlineData: secondBytes)
+        // The replacement carries a different content address, which is what
+        // invalidates the display request the previous payload owned.
+        #expect(residentB.imageBlobID != residentA.imageBlobID)
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [residentA])
+        store.panelDidOpen()
+        let generation = store.panelAuthorizationGeneration
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: residentA,
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: generation,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.settle()
+        #expect(fixture.reader.readCount() == 0)
+        #expect(state.image == nil)
+        let initialColor = try #require(fixture.renderedPreviewColor(hosting))
+        #expect(initialColor.redComponent > initialColor.blueComponent)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: residentB,
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: generation,
+                mediaState: state
+            )
+        )
+        await fixture.settle()
+        // Both payloads are resident, so the replacement is displayed from the
+        // item itself: no lazy state, no blob read, no spinner.
+        let replacementColor = try #require(fixture.renderedPreviewColor(hosting))
+        #expect(replacementColor.blueComponent > replacementColor.redComponent)
+        #expect(state.image == nil)
+        #expect(!state.imageLoadFailed)
+        #expect(fixture.reader.readCount() == 0)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+    }
+    @Test func reopenedGenerationStartsAnAuthorizedRequestForTheCurrentPayload() async throws {
+        let fixture = try CardMediaFixture(blockFirstRead: true)
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: true))
+        let blobID = fixture.writeBlob(bytes)
+        let item = fixture.imageItem(blobID: blobID)
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [item])
+        store.panelDidOpen()
+        let firstGeneration = store.panelAuthorizationGeneration
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: item,
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: firstGeneration,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.reader.waitForFirstRead()
+
+        // Close and reopen without an intermediate render, then actually render
+        // the reopened generation: unlike the late-completion regression, this
+        // one must start a new authorized request and succeed.
+        store.panelDidClose()
+        store.panelDidOpen()
+        let reopenedGeneration = store.panelAuthorizationGeneration
+        #expect(reopenedGeneration > firstGeneration)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: item,
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: reopenedGeneration,
+                mediaState: state
+            )
+        )
+        fixture.reader.releaseFirstRead()
+        await fixture.waitUntil { state.image != nil }
+        await fixture.waitUntil { !fixture.containsProgressIndicator(hosting) }
+        #expect(state.image != nil)
+        #expect(fixture.centerIsRed(try #require(state.image)))
+        #expect(!state.imageLoadFailed)
+        // The first read already verified these bytes, so the authorized
+        // request is served from the loader cache without another disk read.
+        #expect(fixture.reader.readCount() == 1)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+    }
+    @Test func residencyTransitionsStartNoReadsWhileThePanelIsHidden() async throws {
+        let fixture = try CardMediaFixture()
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: true))
+        let blobID = fixture.writeBlob(bytes)
+        let itemID = UUID()
+        let residentItem = fixture.imageItem(id: itemID, inlineData: bytes)
+        let referenceItem = try #require(
+            residentItem.releasingResidentMedia(
+                durableImageBlobID: blobID,
+                durableLinkImageBlobID: nil
+            )
+        )
+
+        let state = ClipboardCardMediaState()
+        // A hidden panel never opened, so the card is not eligible at all.
+        let store = fixture.makeStore(items: [residentItem])
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: residentItem,
+                    store: store,
+                    panelVisible: false,
+                    authorizationGeneration: store.panelAuthorizationGeneration,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.settle()
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: referenceItem,
+                store: store,
+                panelVisible: false,
+                authorizationGeneration: store.panelAuthorizationGeneration,
+                mediaState: state
+            )
+        )
+        await fixture.settle()
+        #expect(fixture.reader.readCount() == 0)
+        #expect(state.image == nil)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: residentItem,
+                store: store,
+                panelVisible: false,
+                authorizationGeneration: store.panelAuthorizationGeneration,
+                mediaState: state
+            )
+        )
+        await fixture.settle()
+        #expect(fixture.reader.readCount() == 0)
+        #expect(state.image == nil)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+    }
+    @Test func residencyTransitionsStartNoReadsWhilePreviewsAreConcealed() async throws {
+        let fixture = try CardMediaFixture()
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: true))
+        let blobID = fixture.writeBlob(bytes)
+        let itemID = UUID()
+        let residentItem = fixture.imageItem(id: itemID, inlineData: bytes)
+        let referenceItem = try #require(
+            residentItem.releasingResidentMedia(
+                durableImageBlobID: blobID,
+                durableLinkImageBlobID: nil
+            )
+        )
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [residentItem])
+        store.panelDidOpen()
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: residentItem,
+                    store: store,
+                    panelVisible: true,
+                    hidesPreview: true,
+                    authorizationGeneration: store.panelAuthorizationGeneration,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.settle()
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: referenceItem,
+                store: store,
+                panelVisible: true,
+                hidesPreview: true,
+                authorizationGeneration: store.panelAuthorizationGeneration,
+                mediaState: state
+            )
+        )
+        await fixture.settle()
+        #expect(fixture.reader.readCount() == 0)
+        #expect(state.image == nil)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: residentItem,
+                store: store,
+                panelVisible: true,
+                hidesPreview: true,
+                authorizationGeneration: store.panelAuthorizationGeneration,
+                mediaState: state
+            )
+        )
+        await fixture.settle()
+        #expect(fixture.reader.readCount() == 0)
+        #expect(state.image == nil)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
     }
     @Test func scrollingHundredImagesWithPreviewsHiddenReadsNothing() async throws {
         let fixture = try CardMediaFixture()
@@ -628,6 +867,341 @@ extension ClipboardCardLazyMediaTests {
         #expect(try result.get() == bytes)
     }
 
+    // MARK: - Same-address residency transitions
+    @Test func residentImageReleasedToItsOwnAddressLoadsThroughTheOnDemandPath() async throws {
+        let fixture = try CardMediaFixture()
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: true))
+        let blobID = fixture.writeBlob(bytes)
+        let itemID = UUID()
+        let residentItem = fixture.imageItem(id: itemID, inlineData: bytes)
+        #expect(residentItem.imageBlobID == blobID)
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [residentItem])
+        store.panelDidOpen()
+        let generation = store.panelAuthorizationGeneration
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: residentItem,
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: generation,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.settle()
+        // Resident bytes are already in hand, so no read may happen yet.
+        #expect(fixture.reader.readCount() == 0)
+        #expect(state.image == nil)
+
+        // The durable commit released the bytes. The address, item ID and all
+        // metadata are untouched, so only residency changed.
+        let referenceItem = try #require(
+            residentItem.releasingResidentMedia(
+                durableImageBlobID: blobID,
+                durableLinkImageBlobID: nil
+            )
+        )
+        #expect(referenceItem.imageBlobID == residentItem.imageBlobID)
+        #expect(referenceItem.imageData == nil)
+        #expect(referenceItem.id == residentItem.id)
+        #expect(referenceItem.createdAt == residentItem.createdAt)
+        #expect(referenceItem.title == residentItem.title)
+        let hostingIdentity = ObjectIdentifier(hosting)
+        #expect(hosting.window?.contentView === hosting)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: referenceItem,
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: generation,
+                mediaState: state
+            )
+        )
+        // The update re-rendered in place: same hosting view, same item ID, same
+        // metadata, same authorization generation, same injected media state.
+        #expect(ObjectIdentifier(hosting) == hostingIdentity)
+        #expect(hosting.window?.contentView === hosting)
+
+        await fixture.waitUntil { state.image != nil }
+        await fixture.waitUntil { !fixture.containsProgressIndicator(hosting) }
+        let displayed = try #require(state.image)
+        #expect(fixture.centerIsRed(displayed))
+        #expect(fixture.reader.readCount() == 1)
+        #expect(fixture.reader.readNames() == ["\(blobID).blob"])
+        #expect(!state.imageLoadFailed)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+    }
+    @Test func sameAddressBecomingResidentClearsLoadedLazyMediaWithoutReadingAgain() async throws {
+        let fixture = try CardMediaFixture()
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: true))
+        let blobID = fixture.writeBlob(bytes)
+        let itemID = UUID()
+        let referenceItem = fixture.imageItem(id: itemID, blobID: blobID)
+        let residentItem = fixture.imageItem(id: itemID, inlineData: bytes)
+        #expect(referenceItem.imageBlobID == residentItem.imageBlobID)
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [referenceItem])
+        store.panelDidOpen()
+        let generation = store.panelAuthorizationGeneration
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: referenceItem,
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: generation,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.waitUntil { state.image != nil }
+        #expect(fixture.centerIsRed(try #require(state.image)))
+        #expect(fixture.reader.readCount() == 1)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: residentItem,
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: generation,
+                mediaState: state
+            )
+        )
+        await fixture.waitUntil { state.image == nil }
+        // The card now displays its own bytes: the lazy state is dropped, no
+        // further read runs and the card keeps its geometry without a spinner.
+        #expect(state.image == nil)
+        #expect(!state.imageLoadFailed)
+        #expect(fixture.reader.readCount() == 1)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+    }
+    @Test func sameAddressBecomingResidentRejectsTheBlockedLazyCompletion() async throws {
+        let fixture = try CardMediaFixture(blockFirstRead: true)
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: true))
+        let blobID = fixture.writeBlob(bytes)
+        let itemID = UUID()
+        let referenceItem = fixture.imageItem(id: itemID, blobID: blobID)
+        let residentItem = fixture.imageItem(id: itemID, inlineData: bytes)
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [referenceItem])
+        store.panelDidOpen()
+        let generation = store.panelAuthorizationGeneration
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: referenceItem,
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: generation,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.reader.waitForFirstRead()
+        #expect(state.image == nil)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: residentItem,
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: generation,
+                mediaState: state
+            )
+        )
+        // Let the resident path supersede the pending request before the blocked
+        // read is released, so which request wins the update cycle cannot decide
+        // the outcome.
+        await fixture.settle()
+        fixture.reader.releaseFirstRead()
+        await fixture.settle()
+        #expect(state.image == nil)
+        #expect(!state.imageLoadFailed)
+        #expect(fixture.reader.readCount() == 1)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+    }
+    @Test func residentLinkImageReleasedToItsOwnAddressLoadsThroughTheOnDemandPath() async throws {
+        let fixture = try CardMediaFixture(blockFirstRead: true)
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: false))
+        let blobID = fixture.writeBlob(bytes)
+        let itemID = UUID()
+        let residentItem = fixture.urlItem(id: itemID, inlineLinkImageData: bytes)
+        #expect(residentItem.linkImageBlobID == blobID)
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [residentItem])
+        store.panelDidOpen()
+        let generation = store.panelAuthorizationGeneration
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: residentItem,
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: generation,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.settle()
+        #expect(fixture.reader.readCount() == 0)
+        #expect(state.linkImage == nil)
+
+        let referenceItem = try #require(
+            residentItem.releasingResidentMedia(
+                durableImageBlobID: nil,
+                durableLinkImageBlobID: blobID
+            )
+        )
+        #expect(referenceItem.linkImageBlobID == residentItem.linkImageBlobID)
+        #expect(referenceItem.linkImageData == nil)
+        #expect(referenceItem.id == residentItem.id)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: referenceItem,
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: generation,
+                mediaState: state
+            )
+        )
+        await fixture.reader.waitForFirstRead()
+        await fixture.waitUntil { fixture.containsProgressIndicator(hosting) }
+        // The reserved preview region keeps its place while the payload loads.
+        let pending = try #require(fixture.firstProgressIndicator(hosting))
+        let pendingCenter = pending.convert(
+            NSPoint(x: pending.bounds.midX, y: pending.bounds.midY),
+            to: hosting
+        )
+        #expect(pendingCenter.y > 236 - 157)
+        #expect(pendingCenter.y < 236 - 52)
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+
+        fixture.reader.releaseFirstRead()
+        await fixture.waitUntil { state.linkImage != nil }
+        await fixture.waitUntil { !fixture.containsProgressIndicator(hosting) }
+        #expect(fixture.centerIsRed(try #require(state.linkImage)) == false)
+        #expect(fixture.reader.readCount() == 1)
+        #expect(fixture.reader.readNames() == ["\(blobID).blob"])
+        #expect(!state.linkImageLoadFailed)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+    }
+    @Test func sameAddressLinkImageBecomingResidentClearsLoadedLazyMediaWithoutReadingAgain() async throws {
+        let fixture = try CardMediaFixture()
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: false))
+        let blobID = fixture.writeBlob(bytes)
+        let itemID = UUID()
+        let referenceItem = fixture.urlItem(id: itemID, blobID: blobID)
+        let residentItem = fixture.urlItem(id: itemID, inlineLinkImageData: bytes)
+        #expect(referenceItem.linkImageBlobID == residentItem.linkImageBlobID)
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [referenceItem])
+        store.panelDidOpen()
+        let generation = store.panelAuthorizationGeneration
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: referenceItem,
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: generation,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.waitUntil { state.linkImage != nil }
+        #expect(fixture.centerIsRed(try #require(state.linkImage)) == false)
+        #expect(fixture.reader.readCount() == 1)
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: residentItem,
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: generation,
+                mediaState: state
+            )
+        )
+        await fixture.waitUntil { state.linkImage == nil }
+        #expect(state.linkImage == nil)
+        #expect(!state.linkImageLoadFailed)
+        #expect(fixture.reader.readCount() == 1)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+        let displayedColor = try #require(fixture.renderedPreviewColor(hosting))
+        #expect(displayedColor.blueComponent > displayedColor.redComponent)
+    }
+
+    @Test func sameAddressBecomingResidentRejectsTheBlockedLinkImageCompletion() async throws {
+        let fixture = try CardMediaFixture(blockFirstRead: true)
+        defer { fixture.cleanUp() }
+        let bytes = try #require(CardMediaFixture.imagePNG(red: false))
+        let blobID = fixture.writeBlob(bytes)
+        let itemID = UUID()
+        let referenceItem = fixture.urlItem(id: itemID, blobID: blobID)
+        let residentItem = fixture.urlItem(id: itemID, inlineLinkImageData: bytes)
+        #expect(referenceItem.linkImageBlobID == residentItem.linkImageBlobID)
+
+        let state = ClipboardCardMediaState()
+        let store = fixture.makeStore(items: [referenceItem])
+        store.panelDidOpen()
+        let generation = store.panelAuthorizationGeneration
+        let (hosting, window) = fixture.host(
+            EquatableCardHost(
+                card: fixture.card(
+                    item: referenceItem,
+                    store: store,
+                    panelVisible: true,
+                    authorizationGeneration: generation,
+                    mediaState: state
+                )
+            )
+        )
+        defer { fixture.dismiss(window) }
+        await fixture.reader.waitForFirstRead()
+        #expect(fixture.containsProgressIndicator(hosting))
+
+        hosting.rootView = EquatableCardHost(
+            card: fixture.card(
+                item: residentItem,
+                store: store,
+                panelVisible: true,
+                authorizationGeneration: generation,
+                mediaState: state
+            )
+        )
+        await fixture.settle()
+        fixture.reader.releaseFirstRead()
+        await fixture.settle()
+        #expect(state.linkImage == nil)
+        #expect(!state.linkImageLoadFailed)
+        #expect(fixture.reader.readCount() == 1)
+        #expect(!fixture.containsProgressIndicator(hosting))
+        #expect(hosting.fittingSize == NSSize(width: 236, height: 236))
+    }
+
     private func requestPNG(from provider: NSItemProvider) async -> Result<Data, Error> {
         await withCheckedContinuation { continuation in
             let lock = NSLock()
@@ -681,6 +1255,20 @@ extension ClipboardCardLazyMediaTests {
         #expect(store.linkMetadataStates.isEmpty)
         #expect(fixture.saveCount() == 0)
         _ = hosting
+    }
+}
+
+/// Mirrors the panel's own card wrapping, so updates are observed through real
+/// `.equatable()` reconciliation. The host adds no identity of its own: replacing
+/// `rootView` re-renders in place, leaving the hosting view, the card's item ID,
+/// its metadata, the authorization generation and the injected `@StateObject`
+/// untouched. No test here loads, releases or re-identifies media by hand.
+@MainActor
+private struct EquatableCardHost: View, Equatable {
+    let card: ClipboardCardView
+
+    var body: some View {
+        card.equatable()
     }
 }
 
@@ -815,6 +1403,7 @@ private final class CardMediaFixture {
         imageItem(id: id, inlineData: nil, blobID: blobID)
     }
 
+
     func imageItem(id: UUID = UUID(), inlineData: Data?) -> ClipboardItem {
         imageItem(id: id, inlineData: inlineData, blobID: nil)
     }
@@ -872,6 +1461,14 @@ private final class CardMediaFixture {
     }
 
     func urlItem(id: UUID = UUID(), blobID: String) -> ClipboardItem {
+        urlItem(id: id, linkImageData: nil, linkImageBlobID: blobID)
+    }
+
+    func urlItem(id: UUID = UUID(), inlineLinkImageData: Data?) -> ClipboardItem {
+        urlItem(id: id, linkImageData: inlineLinkImageData, linkImageBlobID: nil)
+    }
+
+    private func urlItem(id: UUID, linkImageData: Data?, linkImageBlobID: String?) -> ClipboardItem {
         ClipboardItem(
             id: id,
             kind: .url,
@@ -886,8 +1483,8 @@ private final class CardMediaFixture {
             fileURLs: [],
             imageData: nil,
             linkTitle: "Example",
-            linkImageData: nil,
-            linkImageBlobID: blobID
+            linkImageData: linkImageData,
+            linkImageBlobID: linkImageBlobID
         )
     }
 
@@ -946,6 +1543,16 @@ private final class CardMediaFixture {
 
     func firstProgressIndicator(_ view: NSView) -> NSProgressIndicator? {
         allSubviews(of: view).compactMap { $0 as? NSProgressIndicator }.first
+    }
+
+    /// Sample inside both image previews and the URL's reserved image region,
+    /// away from the header, captions and rounded corners.
+    func renderedPreviewColor(_ hosting: NSView) -> NSColor? {
+        hosting.layoutSubtreeIfNeeded()
+        guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return nil }
+        hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+        return bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?
+            .usingColorSpace(.sRGB)
     }
 
     func centerIsRed(_ image: NSImage) -> Bool {

@@ -31,6 +31,7 @@ struct ClipboardCardView: View, Equatable {
     /// display path so retained cards cannot accumulate browsed images.
     @StateObject private var mediaState: ClipboardCardMediaState
 
+
     init(
         item: ClipboardItem,
         pinboards: [CustomPinboard],
@@ -63,8 +64,12 @@ struct ClipboardCardView: View, Equatable {
         _mediaState = StateObject(wrappedValue: mediaState ?? ClipboardCardMediaState())
     }
 
+    /// Renders, actions and drag content all follow from this projection, so a
+    /// card is re-rendered when one of its inputs changes and left alone when
+    /// only media bytes or search-only text changed. Full-item equality would
+    /// compare payload bytes here, which is exactly what this avoids.
     static func == (lhs: ClipboardCardView, rhs: ClipboardCardView) -> Bool {
-        lhs.item == rhs.item &&
+        lhs.renderIdentity == rhs.renderIdentity &&
             lhs.pinboards == rhs.pinboards &&
             lhs.isSelected == rhs.isSelected &&
             lhs.hidesPreview == rhs.hidesPreview &&
@@ -400,39 +405,111 @@ struct ClipboardCardView: View, Equatable {
         item.sourceAppIcon
     }
 
-    var sourceIconIdentity: Int {
-        item.sourceAppIconData?.hashValue ?? 0
+    var sourceIconIdentity: String? {
+        item.sourceAppIconBlobID
     }
 
+    /// Scopes the icon branch to one card, so two cards never share an icon view
+    /// even when their captured icons share a content address. An absent address
+    /// is spelled out instead of collapsing onto an empty address.
     var sourceLogoIdentity: String {
-        "\(item.id.uuidString):\(sourceIconIdentity)"
+        "\(item.id.uuidString):\(sourceIconIdentity ?? "-")"
+    }
+}
+
+/// Card reconciliation identities. Both boundaries the panel relies on — render
+/// equality and display-task invalidation — are described here, so neither the
+/// card body nor the item itself carries media bytes.
+extension ClipboardCardView {
+    /// Identity of one media payload: the address the model already established
+    /// for it, plus whether the item currently holds the bytes that address
+    /// points at. The address alone cannot tell a resident payload from a
+    /// persisted reference, and those take different display paths, so residency
+    /// belongs in the identity. No bytes are compared or hashed to build it.
+    struct MediaPayloadIdentity: Hashable {
+        let blobID: String?
+        let isResident: Bool
+    }
+
+    /// Everything the card renders, offers as an action or drags: the item's
+    /// metadata plus each media payload's identity. Byte-bearing fields and
+    /// `searchText` are excluded, because the card displays neither. Callbacks,
+    /// the store and the loader are excluded too, since callers reuse the same
+    /// instances and the callbacks act on the same item ID.
+    struct CardRenderIdentity: Equatable {
+        let id: UUID
+        let kind: ClipboardKind
+        let title: String
+        let preview: String
+        let sourceApp: String
+        let sourceIcon: MediaPayloadIdentity
+        let createdAt: Date
+        let isPinned: Bool
+        let pinboardName: String?
+        let textValue: String?
+        let fileURLs: [URL]
+        let image: MediaPayloadIdentity
+        let linkTitle: String?
+        let linkImage: MediaPayloadIdentity
+    }
+
+    /// Identity of one display request. Changing it cancels the running task and
+    /// starts the request the card's current payload calls for: eligibility, the
+    /// panel's authorization generation and both media payload identities.
+    struct MediaTaskIdentity: Hashable {
+        let itemID: UUID
+        let image: MediaPayloadIdentity
+        let linkImage: MediaPayloadIdentity
+        let eligible: Bool
+        let authorizationGeneration: Int
+    }
+
+    /// Residency stays represented here even while previews are hidden, because
+    /// the same item still supplies this card's drag behavior.
+    var renderIdentity: CardRenderIdentity {
+        CardRenderIdentity(
+            id: item.id,
+            kind: item.kind,
+            title: item.title,
+            preview: item.preview,
+            sourceApp: item.sourceApp,
+            sourceIcon: sourceIconPayloadIdentity,
+            createdAt: item.createdAt,
+            isPinned: item.isPinned,
+            pinboardName: item.pinboardName,
+            textValue: item.textValue,
+            fileURLs: item.fileURLs,
+            image: imagePayloadIdentity,
+            linkTitle: item.linkTitle,
+            linkImage: linkImagePayloadIdentity
+        )
+    }
+
+    private var imagePayloadIdentity: MediaPayloadIdentity {
+        MediaPayloadIdentity(blobID: item.imageBlobID, isResident: item.imageData != nil)
+    }
+
+    private var linkImagePayloadIdentity: MediaPayloadIdentity {
+        MediaPayloadIdentity(blobID: item.linkImageBlobID, isResident: item.linkImageData != nil)
+    }
+
+    private var sourceIconPayloadIdentity: MediaPayloadIdentity {
+        MediaPayloadIdentity(blobID: item.sourceAppIconBlobID, isResident: item.sourceAppIconData != nil)
+    }
+
+    var mediaTaskIdentity: MediaTaskIdentity {
+        MediaTaskIdentity(
+            itemID: item.id,
+            image: imagePayloadIdentity,
+            linkImage: linkImagePayloadIdentity,
+            eligible: panelVisible && !hidesPreview,
+            authorizationGeneration: authorizationGeneration
+        )
     }
 }
 
 private extension ClipboardCardView {
     // MARK: - On-demand media
-
-    private struct MediaTaskIdentity: Hashable {
-        let itemID: UUID
-        let imageBlobID: String?
-        let linkImageBlobID: String?
-        let imageData: Data?
-        let linkImageData: Data?
-        let eligible: Bool
-        let authorizationGeneration: Int
-    }
-
-    private var mediaTaskIdentity: MediaTaskIdentity {
-        MediaTaskIdentity(
-            itemID: item.id,
-            imageBlobID: item.imageBlobID,
-            linkImageBlobID: item.linkImageBlobID,
-            imageData: item.imageData,
-            linkImageData: item.linkImageData,
-            eligible: panelVisible && !hidesPreview,
-            authorizationGeneration: authorizationGeneration
-        )
-    }
 
     private var isMediaEligible: Bool {
         panelVisible && !hidesPreview
@@ -486,7 +563,7 @@ private extension ClipboardCardView {
 
 private struct SourceLogoImageView: NSViewRepresentable {
     let image: NSImage
-    let identity: Int
+    let identity: String?
 
     func makeNSView(context: Context) -> NSImageView {
         let imageView = NSImageView()
@@ -520,7 +597,7 @@ private struct SourceLogoImageView: NSViewRepresentable {
     }
 
     final class Coordinator {
-        var identity: Int?
+        var identity: String?
     }
 }
 
