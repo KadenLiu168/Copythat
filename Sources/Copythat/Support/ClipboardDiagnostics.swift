@@ -48,16 +48,6 @@ struct ClipboardDiagnostics {
         logger.info("link_preview \(message, privacy: .public)")
     }
 
-    private func emitLinkPreview(_ event: LinkPreviewEvent) {
-        guard isEnabled else { return }
-        if let linkPreviewEventSink {
-            linkPreviewEventSink(event)
-            return
-        }
-        guard let message = try? event.jsonLine() else { return }
-        logger.info("link_preview \(message, privacy: .public)")
-    }
-
     var isEnabled: Bool {
         defaults.bool(forKey: Self.defaultsKey)
     }

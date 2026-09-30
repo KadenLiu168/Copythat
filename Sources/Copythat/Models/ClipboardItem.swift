@@ -29,7 +29,10 @@ enum ClipboardKind: String, Codable, CaseIterable {
 struct ClipboardItem: Identifiable, Codable, Equatable {
     let id: UUID
     let kind: ClipboardKind
-    let title: String
+    /// Display fields the model's own transforms replace. They stay `private(set)`
+    /// so a preview merge or an optimization cannot be assembled field by field
+    /// from outside, where a new field would be easy to drop.
+    private(set) var title: String
     let preview: String
     let sourceApp: String
     let sourceAppIconData: Data?
@@ -41,14 +44,15 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     var pinboardName: String?
     let textValue: String?
     let fileURLs: [URL]
-    let imageData: Data?
-    let linkTitle: String?
-    let linkImageData: Data?
+    private(set) var imageData: Data?
+    private(set) var linkTitle: String?
+    private(set) var linkImageData: Data?
     /// Content address of the bytes backing `imageData`. Retained while V2
     /// history restores heavy media without reading it, so identity and
-    /// persistence survive without resident bytes.
-    let imageBlobID: String?
-    let linkImageBlobID: String?
+    /// persistence survive without resident bytes. Replaced only together with
+    /// its bytes by the transforms that own the role.
+    private(set) var imageBlobID: String?
+    private(set) var linkImageBlobID: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -187,49 +191,30 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
             blobID: linkImageBlobID,
             maxPixel: 640
         )
-        return ClipboardItem(
-            id: id,
-            kind: kind,
-            title: title,
-            preview: preview,
-            sourceApp: sourceApp,
-            sourceAppIconData: sourceAppIconData,
-            sourceAppIconBlobID: sourceAppIconBlobID,
-            createdAt: createdAt,
-            isPinned: isPinned,
-            pinboardName: pinboardName,
-            textValue: textValue,
-            fileURLs: fileURLs,
-            imageData: optimizedImage.data,
-            imageBlobID: optimizedImage.blobID,
-            linkTitle: linkTitle,
-            linkImageData: optimizedLinkImage.data,
-            linkImageBlobID: optimizedLinkImage.blobID
-        )
+
+        var optimized = self
+        // Each role assigns its bytes and final address together, so no other
+        // field is restated and no half-updated payload can exist.
+        optimized.imageData = optimizedImage.data
+        optimized.imageBlobID = finalBlobID(matching: optimizedImage)
+        optimized.linkImageData = optimizedLinkImage.data
+        optimized.linkImageBlobID = finalBlobID(matching: optimizedLinkImage)
+        return optimized
     }
 
     /// Applies an already finalized preview payload, which carries its own
-    /// address; passing nil keeps the current title and preview unchanged.
+    /// address; passing nil keeps the current preview bytes and address, and
+    /// passing nil for the title keeps the current displayed title while the
+    /// link title is assigned that nil.
     func withLinkPreview(title: String?, linkImage: PreparedMedia?) -> ClipboardItem {
-        ClipboardItem(
-            id: id,
-            kind: kind,
-            title: title ?? self.title,
-            preview: preview,
-            sourceApp: sourceApp,
-            sourceAppIconData: sourceAppIconData,
-            sourceAppIconBlobID: sourceAppIconBlobID,
-            createdAt: createdAt,
-            isPinned: isPinned,
-            pinboardName: pinboardName,
-            textValue: textValue,
-            fileURLs: fileURLs,
-            imageData: imageData,
-            imageBlobID: imageBlobID,
-            linkTitle: title,
-            linkImageData: linkImage?.data ?? linkImageData,
-            linkImageBlobID: linkImage?.id ?? linkImageBlobID
-        )
+        var merged = self
+        merged.title = title ?? merged.title
+        merged.linkTitle = title
+        if let linkImage {
+            merged.linkImageData = linkImage.data
+            merged.linkImageBlobID = linkImage.id
+        }
+        return merged
     }
 
     /// Drops resident heavy media whose blob identity a successful save has
@@ -239,8 +224,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     /// durable address keeps its bytes.
     ///
     /// Returns nil when nothing was released, so ownership changes are decided
-    /// without comparing fields. The reconstruction forwards the addresses it
-    /// already knows, which never re-hashes media.
+    /// without comparing fields. Addresses are carried over untouched, which
+    /// never re-hashes media.
     func releasingResidentMedia(
         durableImageBlobID: String?,
         durableLinkImageBlobID: String?
@@ -256,25 +241,25 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
             durableBlobID: durableLinkImageBlobID
         )
         guard releasesImage || releasesLinkImage else { return nil }
-        return ClipboardItem(
-            id: id,
-            kind: kind,
-            title: title,
-            preview: preview,
-            sourceApp: sourceApp,
-            sourceAppIconData: sourceAppIconData,
-            sourceAppIconBlobID: sourceAppIconBlobID,
-            createdAt: createdAt,
-            isPinned: isPinned,
-            pinboardName: pinboardName,
-            textValue: textValue,
-            fileURLs: fileURLs,
-            imageData: releasesImage ? nil : imageData,
-            imageBlobID: imageBlobID,
-            linkTitle: linkTitle,
-            linkImageData: releasesLinkImage ? nil : linkImageData,
-            linkImageBlobID: linkImageBlobID
-        )
+        var released = self
+        if releasesImage {
+            released.imageData = nil
+        }
+        if releasesLinkImage {
+            released.linkImageData = nil
+        }
+        return released
+    }
+
+    /// Replaces only the image role's bytes, for a temporary paste copy that
+    /// carries the verified payload of the blob this item already references.
+    /// Every other field, and the payload's known address, are carried over, so
+    /// the caller never restates them and no identity work happens here.
+    func materializedForPaste(_ media: PreparedMedia) -> ClipboardItem {
+        var materialized = self
+        materialized.imageData = media.data
+        materialized.imageBlobID = media.id
+        return materialized
     }
 
     private func matchesResidentMedia(data: Data?, blobID: String?, durableBlobID: String?) -> Bool {
@@ -282,17 +267,26 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         return blobID == durableBlobID
     }
 
-    /// Storage optimization for raw or unbounded media. Unchanged bytes keep
-    /// their address, changed output receives a new one, and a conversion that
-    /// yields no payload clears the pair. Reference-only media has no bytes to
-    /// convert and keeps its reference.
+    /// Storage optimization for raw or unbounded media. Unchanged bytes report
+    /// their existing address, changed output reports none so its replacement
+    /// payload establishes the new one, and a conversion that yields no payload
+    /// clears both. Reference-only media has no bytes to convert and keeps its
+    /// reference.
     private func storageOptimizedMedia(
         imageData: Data?,
         blobID: String?,
         maxPixel: CGFloat
-    ) -> (data: Data?, blobID: String?) {
+    ) -> (data: Data?, knownBlobID: String?) {
         guard let imageData else { return (nil, blobID) }
         guard let optimized = NSImage(data: imageData)?.pngData(maxPixel: maxPixel) else { return (nil, nil) }
         return optimized == imageData ? (optimized, blobID) : (optimized, nil)
+    }
+
+    /// The address an optimized role ends up with. Payloads that kept their bytes
+    /// forward the address they already had, so nothing is hashed twice; a
+    /// replaced payload establishes its own address once, through the same rule
+    /// raw construction follows.
+    private func finalBlobID(matching optimized: (data: Data?, knownBlobID: String?)) -> String? {
+        Self.mediaBlobID(known: optimized.knownBlobID, data: optimized.data)
     }
 }

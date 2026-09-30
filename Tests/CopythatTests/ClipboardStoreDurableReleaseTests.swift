@@ -74,6 +74,8 @@ struct ClipboardStoreDurableReleaseTests {
         environment.counters.reset()
         #expect(await environment.saveAndFlush(store))
 
+        #expect(store.items.first?.imageData == nil)
+        #expect(store.items.first?.imageBlobID == nil, "a URL item has no image role to release")
         #expect(store.items.first?.linkImageData == nil)
         #expect(store.items.first?.linkImageBlobID == preview.id)
         #expect(store.items.first?.linkTitle == "Example")

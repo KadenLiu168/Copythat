@@ -13,6 +13,49 @@ struct ClipboardItemStorageOptimizationTests {
         #expect(optimized.sourceAppIconData == sourceIconData)
     }
 
+    @Test func storageOptimizedPreservesEveryUntouchedField() throws {
+        let icon = PreparedMedia(hashing: Data(repeating: 0x71, count: 96))
+        let fileURL = URL(fileURLWithPath: "/tmp/copythat-optimization-fixture.txt")
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_700)
+        let item = ClipboardItem(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000071")!,
+            kind: .url,
+            title: "example.com",
+            preview: "https://example.com/optimized",
+            sourceApp: "Fixture",
+            sourceAppIconData: icon.data,
+            sourceAppIconBlobID: icon.id,
+            createdAt: createdAt,
+            isPinned: true,
+            pinboardName: "Archive",
+            textValue: "https://example.com/optimized",
+            fileURLs: [fileURL],
+            imageData: nil,
+            imageBlobID: sha256Hex(Data([0x72])),
+            linkTitle: "Optimization link",
+            linkImageData: nil,
+            linkImageBlobID: sha256Hex(Data([0x73]))
+        )
+
+        let optimized = item.storageOptimized
+
+        #expect(optimized.id == item.id)
+        #expect(optimized.kind == item.kind)
+        #expect(optimized.title == item.title)
+        #expect(optimized.preview == item.preview)
+        #expect(optimized.sourceApp == item.sourceApp)
+        #expect(optimized.sourceAppIconData == icon.data)
+        #expect(optimized.sourceAppIconBlobID == icon.id)
+        #expect(optimized.createdAt == createdAt)
+        #expect(optimized.isPinned)
+        #expect(optimized.pinboardName == "Archive")
+        #expect(optimized.textValue == item.textValue)
+        #expect(optimized.fileURLs == [fileURL])
+        #expect(optimized.linkTitle == "Optimization link")
+        #expect(optimized.contentKey == item.contentKey)
+        #expect(optimized.searchText == item.searchText)
+    }
+
     @Test func referenceOnlyMediaReportsPayloadPresence() {
         let referenceOnly = clipboardItem(
             sourceAppIconData: nil,
@@ -23,8 +66,10 @@ struct ClipboardItemStorageOptimizationTests {
 
         #expect(referenceOnly.hasImagePayload)
         #expect(referenceOnly.hasLinkImagePayload)
+        #expect(referenceOnly.sourceAppIconBlobID == nil)
         #expect(!empty.hasImagePayload)
         #expect(!empty.hasLinkImagePayload)
+        #expect(empty.sourceAppIconBlobID == nil, "absent icon bytes keep an absent address")
     }
 
     @Test func eagerAndLazyImagesShareContentKey() {
@@ -125,10 +170,57 @@ struct ClipboardItemStorageOptimizationTests {
         #expect(counters.mediaHashCount == 0)
     }
 
-    @Test func titleOnlyCompletionPreservesUnloadedPreviewImage() {
-        let linkImageBlobID = sha256Hex(Data([8, 8, 8]))
+    /// Each role clears its own pair, so a failed conversion never disturbs the
+    /// payload the other role kept.
+    @Test func storageOptimizedClearsOnlyTheFailedRole() throws {
+        let decodable = try #require(testImage(width: 64, height: 64).pngData(maxPixel: 64))
         let item = clipboardItem(
             sourceAppIconData: nil,
+            imageData: Data([0x00, 0x01, 0x02, 0x03]),
+            linkImageData: decodable
+        )
+
+        let optimized = item.storageOptimized
+
+        #expect(optimized.imageData == nil)
+        #expect(optimized.imageBlobID == nil)
+        #expect(optimized.linkImageData == decodable)
+        #expect(optimized.linkImageBlobID == sha256Hex(decodable))
+        #expect(!optimized.hasImagePayload)
+        #expect(optimized.hasLinkImagePayload)
+    }
+
+    @Test func storageOptimizedEstablishesOneAddressPerChangedPayload() async throws {
+        let counters = MediaOperationCounters()
+        let oversizedImage = try #require(testImage(width: 2_400, height: 1_200).pngData(maxPixel: 2_400))
+        let oversizedLinkImage = try #require(testImage(width: 1_280, height: 800).pngData(maxPixel: 1_280))
+        let item = clipboardItem(
+            sourceAppIconData: nil,
+            imageData: oversizedImage,
+            linkImageData: oversizedLinkImage
+        )
+
+        counters.reset()
+        let optimized = await counters.measure { item.storageOptimized }
+
+        let optimizedImageData = try #require(optimized.imageData)
+        let optimizedLinkImageData = try #require(optimized.linkImageData)
+        #expect(optimizedImageData != oversizedImage, "the fixture must actually be re-encoded")
+        #expect(optimizedLinkImageData != oversizedLinkImage, "the fixture must actually be re-encoded")
+        #expect(optimized.imageBlobID == sha256Hex(optimizedImageData))
+        #expect(optimized.linkImageBlobID == sha256Hex(optimizedLinkImageData))
+        #expect(optimized.imageBlobID != sha256Hex(oversizedImage), "new bytes must not keep the old address")
+        #expect(optimized.linkImageBlobID != sha256Hex(oversizedLinkImage))
+        #expect(counters.identityHashCount == 2, "each changed payload establishes its address exactly once")
+        #expect(counters.integrityHashCount == 0)
+    }
+
+    @Test func titleOnlyCompletionPreservesUnloadedPreviewImage() {
+        let linkImageBlobID = sha256Hex(Data([8, 8, 8]))
+        let icon = PreparedMedia(hashing: Data(repeating: 0x81, count: 72))
+        let item = clipboardItem(
+            sourceAppIconData: icon.data,
+            sourceAppIconBlobID: icon.id,
             linkImageData: nil,
             imageBlobID: sha256Hex(Data([9])),
             linkImageBlobID: linkImageBlobID
@@ -142,24 +234,54 @@ struct ClipboardItemStorageOptimizationTests {
         #expect(merged.linkImageBlobID == linkImageBlobID)
         #expect(merged.hasLinkImagePayload)
         #expect(merged.imageBlobID == item.imageBlobID)
+        #expect(merged.sourceAppIconData == icon.data)
+        #expect(merged.sourceAppIconBlobID == icon.id)
     }
 
     @Test func titleOnlyCompletionPreservesMaterializedPreviewImage() {
         let linkImageData = Data([4, 2, 0])
-        let item = clipboardItem(sourceAppIconData: nil, linkImageData: linkImageData)
+        let icon = PreparedMedia(hashing: Data(repeating: 0x82, count: 72))
+        let item = clipboardItem(
+            sourceAppIconData: icon.data,
+            sourceAppIconBlobID: icon.id,
+            linkImageData: linkImageData
+        )
 
         let merged = item.withLinkPreview(title: "Updated title", linkImage: nil)
 
         #expect(merged.linkImageData == linkImageData)
         #expect(merged.linkImageBlobID == sha256Hex(linkImageData))
         #expect(merged.hasLinkImagePayload)
+        #expect(merged.sourceAppIconData == icon.data)
+        #expect(merged.sourceAppIconBlobID == icon.id)
+    }
+
+    @Test func titleOnlyCompletionDoesNotHashTheForwardedPayloads() async {
+        let counters = MediaOperationCounters()
+        let icon = PreparedMedia(hashing: Data(repeating: 0x83, count: 72))
+        let linkImage = PreparedMedia(hashing: Data(repeating: 0x84, count: 128))
+        let item = clipboardItem(
+            sourceAppIconData: icon.data,
+            sourceAppIconBlobID: icon.id,
+            linkImageData: linkImage.data,
+            linkImageBlobID: linkImage.id
+        )
+
+        counters.reset()
+        let merged = await counters.measure { item.withLinkPreview(title: "Updated title", linkImage: nil) }
+
+        #expect(merged.linkImageBlobID == linkImage.id)
+        #expect(merged.sourceAppIconBlobID == icon.id)
+        #expect(counters.mediaHashCount == 0)
     }
 
     @Test func newPreviewClearsPriorReferenceAndPropagatesImageReference() {
         let newLinkImageData = Data([5, 5, 1])
         let imageBlobID = sha256Hex(Data([1, 2]))
+        let icon = PreparedMedia(hashing: Data(repeating: 0x85, count: 72))
         let item = clipboardItem(
-            sourceAppIconData: nil,
+            sourceAppIconData: icon.data,
+            sourceAppIconBlobID: icon.id,
             imageBlobID: imageBlobID,
             linkImageBlobID: sha256Hex(Data([6, 6]))
         )
@@ -169,6 +291,8 @@ struct ClipboardItemStorageOptimizationTests {
         #expect(merged.linkImageData == newLinkImageData)
         #expect(merged.linkImageBlobID == sha256Hex(newLinkImageData))
         #expect(merged.imageBlobID == imageBlobID)
+        #expect(merged.sourceAppIconData == icon.data)
+        #expect(merged.sourceAppIconBlobID == icon.id)
     }
 
     @Test func storageOptimizedStillBoundsImageAndLinkPreviewData() throws {
@@ -190,6 +314,7 @@ struct ClipboardItemStorageOptimizationTests {
 
     private func clipboardItem(
         sourceAppIconData: Data?,
+        sourceAppIconBlobID: String? = nil,
         imageData: Data? = nil,
         linkImageData: Data? = nil,
         imageBlobID: String? = nil,
@@ -202,6 +327,7 @@ struct ClipboardItemStorageOptimizationTests {
             preview: "https://example.com",
             sourceApp: "Safari",
             sourceAppIconData: sourceAppIconData,
+            sourceAppIconBlobID: sourceAppIconBlobID,
             createdAt: Date(),
             isPinned: false,
             pinboardName: nil,

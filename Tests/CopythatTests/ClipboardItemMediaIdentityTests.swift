@@ -237,6 +237,82 @@ struct ClipboardItemMediaIdentityTests {
         #expect(counters.mediaHashCount == 0, "release must not re-hash any payload")
     }
 
+    @Test func linkPreviewKeepsSourceIconAndIdentityFieldsWhileReplacingPreviewTitle() async throws {
+        let counters = MediaOperationCounters()
+        let icon = PreparedMedia(hashing: Data(repeating: 0xd1, count: 52))
+        let image = PreparedMedia(hashing: Data(repeating: 0xd2, count: 210))
+        let originalPreview = PreparedMedia(hashing: Data(repeating: 0xd3, count: 90))
+        let fileURL = URL(fileURLWithPath: "/tmp/copythat-preview-fixture.txt")
+        let item = ClipboardItem(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d4")!,
+            kind: .url,
+            title: "example.com",
+            preview: "https://example.com/preview",
+            sourceApp: "Fixture",
+            sourceAppIconData: icon.data,
+            sourceAppIconBlobID: icon.id,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_600),
+            isPinned: true,
+            pinboardName: "Research",
+            textValue: "https://example.com/preview",
+            fileURLs: [fileURL],
+            imageData: image.data,
+            imageBlobID: image.id,
+            linkTitle: "Original link title",
+            linkImageData: originalPreview.data,
+            linkImageBlobID: originalPreview.id
+        )
+        let replacement = PreparedMedia(hashing: Data(repeating: 0xd5, count: 64))
+
+        counters.reset()
+        let merged = await counters.measure {
+            item.withLinkPreview(title: "Merged title", linkImage: replacement)
+        }
+
+        #expect(merged.id == item.id)
+        #expect(merged.kind == item.kind)
+        #expect(merged.preview == item.preview)
+        #expect(merged.sourceApp == item.sourceApp)
+        #expect(merged.sourceAppIconData == icon.data)
+        #expect(merged.sourceAppIconBlobID == icon.id)
+        #expect(merged.createdAt == item.createdAt)
+        #expect(merged.isPinned)
+        #expect(merged.pinboardName == "Research")
+        #expect(merged.textValue == item.textValue)
+        #expect(merged.fileURLs == [fileURL])
+        #expect(merged.imageData == image.data)
+        #expect(merged.imageBlobID == image.id)
+        #expect(merged.title == "Merged title")
+        #expect(merged.linkTitle == "Merged title")
+        #expect(merged.linkImageData == replacement.data)
+        #expect(merged.linkImageBlobID == replacement.id)
+        #expect(merged.linkImageBlobID != originalPreview.id)
+        #expect(counters.mediaHashCount == 0, "a prepared preview forwards its identity without hashing")
+    }
+
+    /// The two nil inputs of a preview merge have opposite meanings: an absent
+    /// title keeps the current one, while absent media keeps the current payload
+    /// and an absent link title is assigned as nil.
+    @Test func linkPreviewAssignsNilLinkTitleAndKeepsNilTitleOnTheDisplayedTitle() async {
+        let item = makeItem(
+            imageData: Data(repeating: 0xe1, count: 64),
+            linkImageData: Data(repeating: 0xe2, count: 96)
+        )
+        let originalLinkTitle = item.linkTitle
+        let originalPreviewData = item.linkImageData
+        let originalPreviewID = item.linkImageBlobID
+
+        let merged = item.withLinkPreview(title: nil, linkImage: nil)
+
+        #expect(item.linkTitle != nil, "the fixture must start with a link title for the assignment to be observable")
+        #expect(merged.title == item.title, "an absent title keeps the displayed title")
+        #expect(merged.linkTitle == nil, "an absent title is assigned, not preserved")
+        #expect(originalLinkTitle != nil)
+        #expect(merged.preview == item.preview)
+        #expect(merged.linkImageData == originalPreviewData)
+        #expect(merged.linkImageBlobID == originalPreviewID)
+    }
+
     private func makeItem(        sourceIcon: Data? = nil,
         imageData: Data? = nil,
         imageBlobID: String? = nil,
@@ -257,6 +333,7 @@ struct ClipboardItemMediaIdentityTests {
             fileURLs: [],
             imageData: imageData,
             imageBlobID: imageBlobID,
+            linkTitle: "Image link title",
             linkImageData: linkImageData,
             linkImageBlobID: linkImageBlobID
         )

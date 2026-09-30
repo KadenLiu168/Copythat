@@ -521,25 +521,10 @@ extension ClipboardStore {
         guard NSImage(data: data) != nil else {
             throw ClipboardPasteMaterializationError.undecodableImage
         }
-        return ClipboardItem(
-            id: item.id,
-            kind: item.kind,
-            title: item.title,
-            preview: item.preview,
-            sourceApp: item.sourceApp,
-            sourceAppIconData: item.sourceAppIconData,
-            sourceAppIconBlobID: item.sourceAppIconBlobID,
-            createdAt: item.createdAt,
-            isPinned: item.isPinned,
-            pinboardName: item.pinboardName,
-            textValue: item.textValue,
-            fileURLs: item.fileURLs,
-            imageData: data,
-            imageBlobID: item.imageBlobID,
-            linkTitle: item.linkTitle,
-            linkImageData: item.linkImageData,
-            linkImageBlobID: item.linkImageBlobID
-        )
+        // The verified bytes and the address they were loaded by are handed to
+        // the model together, so the temporary copy keeps the item's identity
+        // and the Store never writes media fields itself.
+        return item.materializedForPaste(PreparedMedia(data: data, id: blobID))
     }
 
     func writeToPasteboard(_ item: ClipboardItem) -> Bool {

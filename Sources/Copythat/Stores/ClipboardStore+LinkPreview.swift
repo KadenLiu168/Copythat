@@ -33,17 +33,13 @@ extension ClipboardStore {
         case discard
     }
 
-    func runDeferredLinkPreviewReconcile() {
-        performLinkPreviewReconcile()
-    }
-
     /// Wraps a history mutation so reconcile observes only the completed final
     /// filter/selection and metadata registration state, never a transient one.
     func withHistoryStateMutation<T>(_ body: () -> T) -> T {
         isMutatingHistoryState = true
         defer {
             isMutatingHistoryState = false
-            runDeferredLinkPreviewReconcile()
+            performLinkPreviewReconcile()
         }
         return body()
     }

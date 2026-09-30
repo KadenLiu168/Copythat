@@ -111,14 +111,14 @@ private final class PasteMaterializationFixture {
         return blobID
     }
 
-    func makeStore(items: [ClipboardItem]) -> ClipboardStore {
+    func makeStore(items: [ClipboardItem], persistItems: (([ClipboardItem]) -> Void)? = nil) -> ClipboardStore {
         ClipboardStore(
             settings: AppSettings(defaults: defaults),
             sourceTracker: CopySourceTracker(),
             initialItems: items,
             pasteboard: pasteboard,
             mediaLoader: loader,
-            persistItems: { _ in }
+            persistItems: persistItems ?? { _ in }
         )
     }
 
@@ -146,17 +146,24 @@ private final class PasteMaterializationFixture {
         gate?.signal()
     }
 
-    func imageItem(id: UUID = UUID(), blobID: String) -> ClipboardItem {
+    func imageItem(
+        id: UUID = UUID(),
+        blobID: String,
+        sourceIcon: PreparedMedia? = nil,
+        isPinned: Bool = false,
+        pinboardName: String? = nil
+    ) -> ClipboardItem {
         ClipboardItem(
             id: id,
             kind: .image,
             title: "Image",
             preview: "64 x 64",
             sourceApp: "Preview",
-            sourceAppIconData: nil,
+            sourceAppIconData: sourceIcon?.data,
+            sourceAppIconBlobID: sourceIcon?.id,
             createdAt: Date(timeIntervalSince1970: 1_700_000_500),
-            isPinned: false,
-            pinboardName: nil,
+            isPinned: isPinned,
+            pinboardName: pinboardName,
             textValue: nil,
             fileURLs: [],
             imageData: nil,
@@ -288,6 +295,8 @@ struct PanelPasteMaterializationTests {
         #expect(materialized.createdAt == item.createdAt)
         #expect(store.items == originalItems)
         #expect(store.items.first?.imageData == nil)
+        #expect(store.filteredItems == originalItems)
+        #expect(store.filteredItems.first?.imageData == nil)
         #expect(store.selectedID == originalSelection)
 
         #expect(store.writeToPasteboard(materialized))
@@ -295,6 +304,56 @@ struct PanelPasteMaterializationTests {
             (fixture.pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage])?.first
         )
         #expect(pastedImage.size == NSSize(width: 32, height: 32))
+    }
+
+    @Test func materializedCopyKeepsSourceIconOrganizationAndKnownIdentityWithoutSaving() async throws {
+        let fixture = try PasteMaterializationFixture()
+        defer { fixture.cleanUp() }
+        let counters = MediaOperationCounters()
+        let bytes = try #require(PasteMaterializationFixture.imagePNG(red: false))
+        let blobID = fixture.writeBlob(bytes)
+        let icon = PreparedMedia(hashing: Data(repeating: 0x91, count: 88))
+        let itemID = UUID(uuidString: "00000000-0000-0000-0000-000000000091")!
+        let item = fixture.imageItem(
+            id: itemID,
+            blobID: blobID,
+            sourceIcon: icon,
+            isPinned: true,
+            pinboardName: "Work"
+        )
+        let saves = LinkPreviewSaveRecorder()
+        let store = fixture.makeStore(items: [item], persistItems: { saves.record($0) })
+        let changeCountBefore = fixture.pasteboard.changeCount
+
+        counters.reset()
+        let materialized = try await counters.measure { try await store.materializedItemForPaste(item) }
+
+        #expect(materialized.id == item.id)
+        #expect(materialized.kind == item.kind)
+        #expect(materialized.title == item.title)
+        #expect(materialized.preview == item.preview)
+        #expect(materialized.sourceApp == item.sourceApp)
+        #expect(materialized.sourceAppIconData == icon.data)
+        #expect(materialized.sourceAppIconBlobID == icon.id)
+        #expect(materialized.createdAt == item.createdAt)
+        #expect(materialized.isPinned)
+        #expect(materialized.pinboardName == "Work")
+        #expect(materialized.textValue == item.textValue)
+        #expect(materialized.fileURLs == item.fileURLs)
+        #expect(materialized.imageData == bytes)
+        #expect(materialized.imageBlobID == blobID)
+        #expect(materialized.linkImageData == item.linkImageData)
+        #expect(materialized.linkImageBlobID == item.linkImageBlobID)
+        #expect(materialized.contentKey == item.contentKey)
+        #expect(counters.identityHashCount == 0, "materialization forwards a known identity instead of establishing one")
+        #expect(counters.integrityHashCount == 1, "the loader verifies the stored blob once and nothing re-verifies it")
+
+        #expect(store.items == [item], "materialization must not rewrite history")
+        #expect(store.items.first?.imageData == nil)
+        #expect(store.filteredItems.first?.imageData == nil)
+        #expect(saves.count == 0, "a temporary copy must not request a save")
+        #expect(fixture.loaderReads.count == 1, "materialization reads the blob exactly once")
+        #expect(fixture.pasteboard.changeCount == changeCountBefore, "materialization alone must not write the pasteboard")
     }
 
     @Test func materializationFailsForMissingCorruptAndUndecodableMedia() async throws {

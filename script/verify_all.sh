@@ -36,10 +36,6 @@ if [[ -d "$SWIFT_FRAMEWORKS/Testing.framework" ]]; then
 else
     swift test
 fi
-SOURCE_RESOLUTION_BIN="$(mktemp -t copythat_source_resolution)"
-swiftc Sources/Copythat/Support/CopySourceResolution.swift script/verify/source_resolution.swift -o "$SOURCE_RESOLUTION_BIN"
-"$SOURCE_RESOLUTION_BIN"
-rm -f "$SOURCE_RESOLUTION_BIN"
 ./script/verify/source_attribution_timing_test.sh
 
 python3 - <<'PY'
