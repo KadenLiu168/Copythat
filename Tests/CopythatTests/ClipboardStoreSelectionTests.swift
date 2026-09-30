@@ -40,6 +40,21 @@ struct ClipboardStoreSelectionTests {
         #expect(store.selectedID == alpha.id)
     }
 
+    @Test func queryChangesPreserveAStillMatchingNonFirstSelection() {
+        let first = item(text: "Alpha first")
+        let selected = item(text: "Alpha second")
+        let store = store(items: [first, selected])
+        store.select(selected)
+
+        store.searchText = "alpha"
+
+        #expect(store.filteredItems.map(\.id) == [first.id, selected.id])
+        #expect(store.selectedID == selected.id)
+
+        store.searchText = ""
+        #expect(store.selectedID == selected.id)
+    }
+
     @Test func filteringToNoItemsClearsSelection() {
         let store = store(items: [item(text: "Alpha match")])
 
@@ -364,6 +379,35 @@ struct ClipboardStoreSelectionTests {
         #expect(store.items == itemsBefore)
         #expect(store.filteredItems == filteredBefore)
         #expect(settings.customPinboards == [CustomPinboard(name: "Work", color: .blue)])
+    }
+
+    @Test func unknownBoardIDFallsBackToTheFullClipboardAndKeepsSearch() {
+        let alpha = item(text: "Alpha")
+        let beta = item(text: "Beta")
+        let store = store(items: [alpha, beta])
+
+        store.selectedBoardID = "unknown:board"
+
+        #expect(store.filteredItems.map(\.id) == [alpha.id, beta.id])
+
+        store.searchText = "beta"
+        #expect(store.filteredItems.map(\.id) == [beta.id])
+    }
+
+    @Test func queryTrimmingAndCaseNormalizationApplyInsideABoardFilter() {
+        let matching = item(text: "Alpha assigned", pinboardName: "Work")
+        let other = item(text: "Alpha other")
+        let store = store(items: [matching, other])
+        store.selectedBoardID = Pinboard.custom("Work").id
+
+        store.searchText = "  ALPHA  "
+        #expect(store.filteredItems.map(\.id) == [matching.id])
+
+        store.searchText = "   "
+        #expect(store.filteredItems.map(\.id) == [matching.id], "a whitespace-only query is an empty query")
+
+        store.searchText = ""
+        #expect(store.filteredItems.map(\.id) == [matching.id])
     }
 
     private func store(items: [ClipboardItem]) -> ClipboardStore {

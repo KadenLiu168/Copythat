@@ -37,8 +37,12 @@ struct ClipboardItemStorageOptimizationTests {
             linkImageBlobID: sha256Hex(Data([0x73]))
         )
 
-        let optimized = item.storageOptimized
+        let recorder = SearchCorpusRecorder()
+        let optimized = SearchCorpusObservation.$recorder.withValue(recorder) {
+            item.storageOptimized
+        }
 
+        #expect(recorder.count == 0, "media residency is not searchable")
         #expect(optimized.id == item.id)
         #expect(optimized.kind == item.kind)
         #expect(optimized.title == item.title)
@@ -361,9 +365,9 @@ struct ClipboardItemStorageOptimizationTests {
             bitsPerPixel: 0
         )!
         let color = NSColor(calibratedRed: 0.24, green: 0.48, blue: 0.82, alpha: 1)
-        for x in 0..<width {
-            for y in 0..<height {
-                bitmap.setColor(color, atX: x, y: y)
+        for column in 0..<width {
+            for row in 0..<height {
+                bitmap.setColor(color, atX: column, y: row)
             }
         }
 

@@ -53,6 +53,10 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     /// its bytes by the transforms that own the role.
     private(set) var imageBlobID: String?
     private(set) var linkImageBlobID: String?
+    /// Runtime-derived searchable text, established once by the initializer or
+    /// decoder and replaced by the one transform that changes searchable
+    /// metadata. Never persisted: it is always rebuilt from decoded metadata.
+    private(set) var searchText: String
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -107,6 +111,14 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         self.linkImageData = linkImageData
         self.imageBlobID = Self.mediaBlobID(known: imageBlobID, data: imageData)
         self.linkImageBlobID = Self.mediaBlobID(known: linkImageBlobID, data: linkImageData)
+        searchText = Self.makeSearchText(
+            title: title,
+            preview: preview,
+            linkTitle: linkTitle,
+            sourceApp: sourceApp,
+            kind: kind,
+            fileURLs: fileURLs
+        )
     }
 
     /// Resident bytes imply an address. Raw construction establishes that address
@@ -140,10 +152,29 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         imageBlobID = Self.mediaBlobID(known: nil, data: decodedImageData)
         linkImageBlobID = Self.mediaBlobID(known: nil, data: decodedLinkImageData)
         sourceAppIconBlobID = Self.mediaBlobID(known: nil, data: sourceAppIconData)
+        searchText = Self.makeSearchText(
+            title: title,
+            preview: preview,
+            linkTitle: linkTitle,
+            sourceApp: sourceApp,
+            kind: kind,
+            fileURLs: fileURLs
+        )
     }
 
-    var searchText: String {
-        ([title, preview, linkTitle, sourceApp, kind.label].compactMap(\.self) + fileURLs.map(\.path))
+    /// The single place a search corpus is assembled. Field set, order, space
+    /// delimiter and localized case normalization are the expression search
+    /// has always applied; only its lifetime changed.
+    private static func makeSearchText(
+        title: String,
+        preview: String,
+        linkTitle: String?,
+        sourceApp: String,
+        kind: ClipboardKind,
+        fileURLs: [URL]
+    ) -> String {
+        SearchCorpusObservation.record()
+        return ([title, preview, linkTitle, sourceApp, kind.label].compactMap(\.self) + fileURLs.map(\.path))
             .joined(separator: " ")
             .localizedLowercase
     }
@@ -214,6 +245,14 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
             merged.linkImageData = linkImage.data
             merged.linkImageBlobID = linkImage.id
         }
+        merged.searchText = Self.makeSearchText(
+            title: merged.title,
+            preview: merged.preview,
+            linkTitle: merged.linkTitle,
+            sourceApp: merged.sourceApp,
+            kind: merged.kind,
+            fileURLs: merged.fileURLs
+        )
         return merged
     }
 
@@ -288,5 +327,38 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     /// raw construction follows.
     private func finalBlobID(matching optimized: (data: Data?, knownBlobID: String?)) -> String? {
         Self.mediaBlobID(known: optimized.knownBlobID, data: optimized.data)
+    }
+}
+
+/// Test-installed sink for actual search corpus builds. One recorder belongs to
+/// one test: counting is lock-guarded so concurrent work inside that test is
+/// accounted for, and tests without a recorder observe nothing. It holds a
+/// count only, never clipboard content.
+final class SearchCorpusRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buildCount = 0
+
+    func record() {
+        lock.lock()
+        buildCount += 1
+        lock.unlock()
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return buildCount
+    }
+}
+
+/// Observation seam for search corpus builds. The recorder is task-local, so
+/// parallel tests never share counters and production runs without one.
+/// Corpus builds run synchronously inside model construction and transforms,
+/// so no detached boundary needs explicit propagation.
+enum SearchCorpusObservation {
+    @TaskLocal static var recorder: SearchCorpusRecorder?
+
+    static func record() {
+        recorder?.record()
     }
 }

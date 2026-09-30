@@ -929,17 +929,15 @@ extension ClipboardStore {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
         let board = Pinboard(id: selectedBoardID)
         filteredItems = items.filter { item in
-            let boardMatches: Bool
             switch board.kind {
             case .all, .unknown:
-                boardMatches = true
+                break
             case .pinned:
-                boardMatches = item.isPinned
+                guard item.isPinned else { return false }
             case .custom:
-                boardMatches = item.pinboardName == board.customName
+                guard item.pinboardName == board.customName else { return false }
             }
-            let searchMatches = query.isEmpty || item.searchText.contains(query)
-            return boardMatches && searchMatches
+            return query.isEmpty || item.searchText.contains(query)
         }
         if let selectedID, filteredItems.contains(where: { $0.id == selectedID }) {
             reconcileLinkPreviewFallback()

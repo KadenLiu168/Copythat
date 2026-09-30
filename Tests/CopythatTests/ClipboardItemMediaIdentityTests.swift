@@ -313,6 +313,35 @@ struct ClipboardItemMediaIdentityTests {
         #expect(merged.linkImageBlobID == originalPreviewID)
     }
 
+    @Test func mediaTransformsReuseTheStoredCorpusWithoutRebuilding() async {
+        let recorder = SearchCorpusRecorder()
+        let image = PreparedMedia(hashing: Data(repeating: 0xb3, count: 200))
+        let linkImage = PreparedMedia(hashing: Data(repeating: 0xb4, count: 120))
+        let paste = PreparedMedia(hashing: Data(repeating: 0xb5, count: 80))
+        let item = makeItem(
+            imageData: image.data,
+            imageBlobID: image.id,
+            linkImageData: linkImage.data,
+            linkImageBlobID: linkImage.id
+        )
+
+        let (released, materialized) = await SearchCorpusObservation.$recorder.withValue(recorder) {
+            (
+                item.releasingResidentMedia(durableImageBlobID: image.id, durableLinkImageBlobID: linkImage.id),
+                item.materializedForPaste(paste)
+            )
+        }
+
+        #expect(recorder.count == 0)
+        #expect(released?.imageData == nil, "the release fixture must actually drop bytes")
+        #expect(released?.linkImageData == nil)
+        #expect(released?.searchText == item.searchText)
+        #expect(released?.contentKey == item.contentKey)
+        #expect(materialized.imageData == paste.data, "the materialization fixture must actually replace bytes")
+        #expect(materialized.imageBlobID == paste.id)
+        #expect(materialized.searchText == item.searchText)
+    }
+
     private func makeItem(        sourceIcon: Data? = nil,
         imageData: Data? = nil,
         imageBlobID: String? = nil,

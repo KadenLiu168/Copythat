@@ -55,6 +55,47 @@ struct StoreLinkPreviewOrchestrationTests {
         #expect(store.filteredItems.map(\.id) == [item.id])
     }
 
+    // Case 1: enrichment replaces stale searchable text in the affected item.
+    @Test func metadataEnrichmentRebuildsOnlyTheAffectedCorpus() async throws {
+        let item = LinkPreviewFixture.urlItem(
+            urlString: "https://oldterm.example.com/",
+            linkTitle: "oldtitlemark"
+        )
+        let unrelated = LinkPreviewFixture.textItem(text: "unrelated textmark")
+        let store = makeStore(
+            items: [unrelated],
+            metadata: .titleOnly("newtitlemark"),
+            snapshot: .image(snapshotData)
+        )
+        let corpusRecorder = SearchCorpusRecorder()
+        let unrelatedCorpus = unrelated.searchText
+
+        // The window stays installed across the awaited completion checkpoint,
+        // so a rebuild there is observed rather than silently missed.
+        await SearchCorpusObservation.$recorder.withValue(corpusRecorder) {
+            store.add(item)
+            await counter.waitForEnd("metadata:all", reaching: 1)
+            await recorder.waitForSaveCount(2)
+            await counter.waitFor("handled", reaching: 1)
+
+            #expect(corpusRecorder.count == 1, "only the enriched item may rebuild its corpus")
+            #expect(counter.value("snapshot:all") == 0)
+            #expect(recorder.last?.first { $0.id == item.id }?.linkTitle == "newtitlemark")
+
+            store.searchText = "newtitlemark"
+            #expect(store.filteredItems.map(\.id) == [item.id], "a fresh title must match immediately")
+
+            store.searchText = "oldtitlemark"
+            #expect(store.filteredItems.isEmpty, "a token only in the replaced link title must stop matching")
+
+            store.searchText = "textmark"
+            #expect(store.filteredItems.map(\.id) == [unrelated.id])
+
+            #expect(store.items.first { $0.id == unrelated.id }?.searchText == unrelatedCorpus)
+            #expect(corpusRecorder.count == 1, "query changes must not rebuild any corpus")
+        }
+    }
+
     // Case 2: metadata supplies an image; opening the panel never snapshots.
     @Test func metadataImageAppliesAndPanelOpenNeverSnapshots() async throws {
         let url = "https://example.com/"

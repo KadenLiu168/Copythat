@@ -27,55 +27,7 @@ struct ClipboardHistoryPerformanceTests {
         )
         // Four distinct source icons shared across 500 items: restore must
         // deduplicate them while never touching the per-item heavy payloads.
-        let icons = (0..<4).map { Data(repeating: UInt8(0x40 + $0), count: 96) }
-        var items: [ClipboardItem] = []
-        items.reserveCapacity(500)
-        var heavyBlobIDs: Set<String> = []
-        for index in 0..<500 {
-            let icon = icons[index % icons.count]
-            let media = Data(
-                [UInt8(index >> 8), UInt8(index & 0xFF)] + [UInt8](repeating: 0x5A, count: 62)
-            )
-            heavyBlobIDs.insert(Self.sha256Hex(media))
-            if index.isMultiple(of: 2) {
-                items.append(
-                    ClipboardItem(
-                        id: UUID(),
-                        kind: .image,
-                        title: "Image \(index)",
-                        preview: "64 x 64",
-                        sourceApp: "Preview",
-                        sourceAppIconData: icon,
-                        createdAt: Date(timeIntervalSince1970: TimeInterval(-index)),
-                        isPinned: false,
-                        pinboardName: nil,
-                        textValue: nil,
-                        fileURLs: [],
-                        imageData: media
-                    )
-                )
-            } else {
-                let url = "https://media.example.com/item/\(index)"
-                items.append(
-                    ClipboardItem(
-                        id: UUID(),
-                        kind: .url,
-                        title: "media.example.com",
-                        preview: url,
-                        sourceApp: "Safari",
-                        sourceAppIconData: icon,
-                        createdAt: Date(timeIntervalSince1970: TimeInterval(-index)),
-                        isPinned: false,
-                        pinboardName: nil,
-                        textValue: url,
-                        fileURLs: [],
-                        imageData: nil,
-                        linkTitle: "Item \(index)",
-                        linkImageData: media
-                    )
-                )
-            }
-        }
+        let (items, heavyBlobIDs) = Self.mediaHeavyHistory()
         try persistence.save(items)
         blobReads.removeAll()
 
@@ -174,6 +126,119 @@ struct ClipboardHistoryPerformanceTests {
         #expect(pinnedResults.count == 20)
         #expect(workResults.count == 10)
         #expect(encoded.count < 2_000_000)
+    }
+
+    @Test func repeatedQueriesOverAConfiguredHistoryReuseEachCorpusOnce() {
+        let buckets = ["alpha", "bravo", "charlie", "delta", "echo"]
+        let recorder = SearchCorpusRecorder()
+        var items: [ClipboardItem] = []
+        items.reserveCapacity(1_000)
+
+        // Every item is created inside the measurement window, so the positive
+        // count below proves the recorder is actually installed.
+        SearchCorpusObservation.$recorder.withValue(recorder) {
+            for index in 0..<1_000 {
+                items.append(
+                    ClipboardItem(
+                        id: UUID(),
+                        kind: .text,
+                        title: "Item \(index)",
+                        preview: "\(buckets[index % buckets.count]) payload \(index)",
+                        sourceApp: "Generator",
+                        sourceAppIconData: nil,
+                        createdAt: Date(timeIntervalSince1970: TimeInterval(-index)),
+                        isPinned: false,
+                        pinboardName: nil,
+                        textValue: "payload \(index)",
+                        fileURLs: [],
+                        imageData: nil
+                    )
+                )
+            }
+
+            #expect(recorder.count == 1_000, "each created item builds its corpus exactly once")
+
+            let store = ClipboardStore(
+                settings: AppSettings(defaults: temporaryDefaults()),
+                sourceTracker: CopySourceTracker(),
+                initialItems: items,
+                pasteboard: NSPasteboard.withUniqueName(),
+                persistItems: { _ in }
+            )
+
+            #expect(store.filteredItems.map(\.id) == items.map(\.id))
+            #expect(recorder.count == 1_000, "constructing the history view must not rebuild a corpus")
+
+            for (bucketIndex, bucket) in buckets.enumerated() {
+                store.searchText = bucket
+                let expected = stride(from: bucketIndex, to: 1_000, by: 5).map { items[$0].id }
+                #expect(store.filteredItems.map(\.id) == expected, "query \(bucket) must return matches in history order")
+            }
+
+            store.searchText = "ALPHA"
+            #expect(store.filteredItems.map(\.id) == stride(from: 0, to: 1_000, by: 5).map { items[$0].id })
+
+            store.searchText = "zulu"
+            #expect(store.filteredItems.isEmpty)
+
+            #expect(recorder.count == 1_000, "query changes reuse each corpus; no query rebuilds one")
+        }
+    }
+
+    /// Four distinct source icons shared across 500 items, half image and half
+    /// URL with a link image. Restore must deduplicate the icons while never
+    /// touching the per-item heavy payloads.
+    private static func mediaHeavyHistory() -> (items: [ClipboardItem], heavyBlobIDs: Set<String>) {
+        let icons = (0..<4).map { Data(repeating: UInt8(0x40 + $0), count: 96) }
+        var items: [ClipboardItem] = []
+        items.reserveCapacity(500)
+        var heavyBlobIDs: Set<String> = []
+        for index in 0..<500 {
+            let icon = icons[index % icons.count]
+            let media = Data(
+                [UInt8(index >> 8), UInt8(index & 0xFF)] + [UInt8](repeating: 0x5A, count: 62)
+            )
+            heavyBlobIDs.insert(Self.sha256Hex(media))
+            if index.isMultiple(of: 2) {
+                items.append(
+                    ClipboardItem(
+                        id: UUID(),
+                        kind: .image,
+                        title: "Image \(index)",
+                        preview: "64 x 64",
+                        sourceApp: "Preview",
+                        sourceAppIconData: icon,
+                        createdAt: Date(timeIntervalSince1970: TimeInterval(-index)),
+                        isPinned: false,
+                        pinboardName: nil,
+                        textValue: nil,
+                        fileURLs: [],
+                        imageData: media
+                    )
+                )
+            } else {
+                let url = "https://media.example.com/item/\(index)"
+                items.append(
+                    ClipboardItem(
+                        id: UUID(),
+                        kind: .url,
+                        title: "media.example.com",
+                        preview: url,
+                        sourceApp: "Safari",
+                        sourceAppIconData: icon,
+                        createdAt: Date(timeIntervalSince1970: TimeInterval(-index)),
+                        isPinned: false,
+                        pinboardName: nil,
+                        textValue: url,
+                        fileURLs: [],
+                        imageData: nil,
+                        linkTitle: "Item \(index)",
+                        linkImageData: media
+                    )
+                )
+            }
+        }
+        return (items, heavyBlobIDs)
     }
 
     private func temporaryDefaults() -> UserDefaults {
