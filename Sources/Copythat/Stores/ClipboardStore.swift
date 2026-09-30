@@ -70,6 +70,7 @@ final class ClipboardStore: ObservableObject {
     /// and image drag, all reading the same persisted blob store.
     let mediaLoader: ClipboardHistoryMediaLoader
     private let persistItems: ([ClipboardItem]) -> Void
+    private var historyLimitCancellable: AnyCancellable?
     private var timer: Timer?
     private var pollTask: Task<Void, Never>?
     private var imageEncodingTask: Task<Void, Never>?
@@ -182,8 +183,25 @@ final class ClipboardStore: ObservableObject {
         self.burstPollInterval = burstPollInterval
         self.burstWindow = burstWindow
         lastChangeCount = pasteboard.changeCount
-        items = initialItems ?? ClipboardHistoryPersistence.loadItems()
+        let loadedItems = initialItems ?? ClipboardHistoryPersistence.loadItems()
+        let startupEnforcement = ClipboardHistoryPolicy.enforcingLimits(
+            on: loadedItems,
+            limit: settings.historyLimit
+        )
+        items = startupEnforcement.items
         refreshFilteredItems()
+        if !startupEnforcement.removedItemIDs.isEmpty {
+            saveItems()
+        }
+        historyLimitCancellable = settings.$historyLimit
+            .dropFirst()
+            .sink { [weak self] _ in
+                // `@Published` publishes in `willSet`, so defer to a later
+                // main-actor turn and re-read the normalized current value.
+                Task { @MainActor [weak self] in
+                    self?.enforceHistoryBounds()
+                }
+            }
     }
 
     deinit {
@@ -486,23 +504,41 @@ extension ClipboardStore {
 
     func add(_ item: ClipboardItem) {
         withHistoryStateMutation {
-            let beforeIDs = Set(items.map(\.id))
-            let duplicateMetadata = ClipboardDiagnostics.duplicateMetadata(for: item, in: items)
+            let beforeCount = items.count
             let insertion = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
             items = insertion.items
             diagnostics.logInsertion(
                 item: item,
-                beforeCount: beforeIDs.count,
+                beforeCount: beforeCount,
                 afterCount: items.count,
-                duplicateMetadata: duplicateMetadata
+                duplicateSummary: insertion.duplicateSummary
             )
-            let removedIDs = beforeIDs.subtracting(insertion.items.map(\.id))
-            cleanupLinkPreviewWork(forRemovedItemIDs: Array(removedIDs))
-            discardPendingDurableMediaRelease(forRemovedItemIDs: Array(removedIDs))
+            cleanupLinkPreviewWork(forRemovedItemIDs: insertion.removedItemIDs)
+            discardPendingDurableMediaRelease(forRemovedItemIDs: insertion.removedItemIDs)
             refreshFilteredItems()
-            selectedID = insertion.selectedID
+            if let selectedItemID = insertion.selectedItemID {
+                selectedID = selectedItemID
+            }
             saveItems()
             registerLinkMetadataIfNeeded(for: insertion.insertedItem)
+        }
+    }
+
+    /// Applies the configured bounds to existing history after a settings-driven
+    /// limit change. Enforcement always re-reads the normalized current setting,
+    /// so rapid or pre-normalization publications can never trim by a stale
+    /// value. A trim assigns the final array once, cleans up removed preview and
+    /// durable-media work, and saves once; automatic eviction is never a user
+    /// deletion and keeps image-encoding work alive.
+    func enforceHistoryBounds() {
+        let enforcement = ClipboardHistoryPolicy.enforcingLimits(on: items, limit: settings.historyLimit)
+        guard !enforcement.removedItemIDs.isEmpty else { return }
+        withHistoryStateMutation {
+            items = enforcement.items
+            cleanupLinkPreviewWork(forRemovedItemIDs: enforcement.removedItemIDs)
+            discardPendingDurableMediaRelease(forRemovedItemIDs: enforcement.removedItemIDs)
+            refreshFilteredItems()
+            saveItems()
         }
     }
 

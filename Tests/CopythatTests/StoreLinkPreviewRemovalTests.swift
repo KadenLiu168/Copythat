@@ -235,7 +235,115 @@ struct StoreLinkPreviewRemovalTests {
 
         #expect(store.items.count == 100)
         #expect(store.items.contains { $0.id == urlItem.id } == false)
+        #expect(store.selectedID == pinnedItems.first?.id, "a discarded incoming item must not become selected")
         #expect(counter.value("metadata:https://evicted.example.com/") == 0)
+    }
+
+    @Test func directLimitReductionCancelsEvictedMetadataAndKeepsRetainedWork() async {
+        let evictedURL = "https://evicted-limit.example.com/"
+        let keptURL = "https://kept-limit.example.com/"
+        let evicted = LinkPreviewFixture.urlItem(urlString: evictedURL)
+        let kept = LinkPreviewFixture.urlItem(urlString: keptURL)
+        let fillers = (0..<198).map { LinkPreviewFixture.textItem(text: "limit metadata filler \($0)") }
+        let evictedGate = LinkPreviewGate()
+        let keptGate = LinkPreviewGate()
+        let limitDefaults = LinkPreviewFixture.tempDefaults("limit-metadata")
+        limitDefaults.set(200, forKey: "historyLimit")
+        let settings = AppSettings(defaults: limitDefaults)
+        let store = ClipboardStore(
+            settings: settings,
+            sourceTracker: CopySourceTracker(),
+            initialItems: [kept] + fillers + [evicted],
+            pasteboard: LinkPreviewFixture.uniquePasteboard(),
+            persistItems: { recorder.record($0) },
+            fetchLinkMetadata: { url in
+                counter.mark("limit-metadata:\(url.absoluteString)")
+                if url.absoluteString == evictedURL {
+                    await evictedGate.waitOrCancelled()
+                } else {
+                    await keptGate.waitOrCancelled()
+                }
+                return LinkPreviewMetadata(title: "Title", image: nil)
+            },
+            fetchLinkSnapshot: { _ in throw URLError(.badServerResponse) }
+        )
+        store.linkPreviewHandledObserver = { counter.mark("limit-metadata-handled") }
+
+        store.panelDidOpen()
+        await counter.waitFor("limit-metadata:\(keptURL)", reaching: 1)
+        store.select(evicted)
+        await counter.waitFor("limit-metadata:\(evictedURL)", reaching: 1)
+
+        let savesBeforeReduction = recorder.count
+        settings.historyLimit = 100
+        await waitForHistoryLimitEnforcement()
+
+        #expect(!store.items.contains { $0.id == evicted.id })
+        #expect(store.items.count == 100)
+        #expect(store.metadataTasks[evicted.id] == nil)
+        #expect(store.linkMetadataStates[evicted.id] == nil)
+        #expect(store.metadataTasks[kept.id] != nil)
+        #expect(store.linkMetadataStates[kept.id] == .pending)
+        #expect(recorder.count == savesBeforeReduction + 1, "the trim itself requests one save")
+
+        let savesAfterTrim = recorder.count
+        evictedGate.release()
+        await counter.waitFor("limit-metadata-handled", reaching: 1)
+        #expect(recorder.count == savesAfterTrim, "a late evicted metadata result must not save")
+
+        keptGate.release()
+        await counter.waitFor("limit-metadata-handled", reaching: 2)
+        #expect(store.items.first { $0.id == kept.id }?.linkTitle == "Title")
+        #expect(recorder.count == savesAfterTrim + 1, "retained metadata still applies")
+    }
+
+    @Test func directLimitReductionCancelsPendingFallbackWithoutLateSave() async {
+        let evictedURL = "https://evicted-fallback.example.com/"
+        let evicted = LinkPreviewFixture.urlItem(urlString: evictedURL)
+        let kept = LinkPreviewFixture.textItem(text: "fallback kept head")
+        let fillers = (0..<198).map { LinkPreviewFixture.textItem(text: "limit fallback filler \($0)") }
+        let gate = LinkPreviewGate()
+        let limitDefaults = LinkPreviewFixture.tempDefaults("limit-fallback")
+        limitDefaults.set(200, forKey: "historyLimit")
+        let settings = AppSettings(defaults: limitDefaults)
+        let store = ClipboardStore(
+            settings: settings,
+            sourceTracker: CopySourceTracker(),
+            initialItems: [kept] + fillers + [evicted],
+            pasteboard: LinkPreviewFixture.uniquePasteboard(),
+            persistItems: { recorder.record($0) },
+            fetchLinkMetadata: { url in
+                counter.mark("limit-fallback-metadata:\(url.absoluteString)")
+                return LinkPreviewMetadata(title: "Title", image: nil)
+            },
+            fetchLinkSnapshot: LinkPreviewSnapshotScript.lateAfterCancel(gate, then: .image(snapshotData))
+                .loader(counter: counter, key: "limit-fallback")
+        )
+        store.linkPreviewHandledObserver = { counter.mark("limit-fallback-handled") }
+
+        store.panelDidOpen()
+        store.select(evicted)
+        await counter.waitFor("limit-fallback-metadata:\(evictedURL)", reaching: 1)
+        await counter.waitFor("snapshot:limit-fallback", reaching: 1)
+
+        let savesBeforeReduction = recorder.count
+        settings.historyLimit = 100
+        await waitForHistoryLimitEnforcement()
+
+        #expect(!store.items.contains { $0.id == evicted.id })
+        #expect(store.activeFallback?.isCancelled == true)
+        #expect(recorder.count == savesBeforeReduction + 1, "the trim itself requests one save")
+
+        let savesAfterTrim = recorder.count
+        gate.release()
+        await counter.waitFor("limit-fallback-handled", reaching: 1)
+        #expect(recorder.count == savesAfterTrim, "a late evicted snapshot must not save")
+        #expect(store.snapshotPositiveCache.isEmpty)
+    }
+
+    private func waitForHistoryLimitEnforcement() async {
+        await Task.yield()
+        await Task.yield()
     }
 
     // Case 7: a plain duplicate keeps the existing item ID and its in-flight
@@ -264,6 +372,7 @@ struct StoreLinkPreviewRemovalTests {
 
         #expect(store.items.count == 1)
         #expect(store.items.first?.id == item.id)
+        #expect(store.selectedID == item.id, "a moved duplicate keeps the existing entry selected")
         #expect(counter.value("metadata:\(url)") == 1)
 
         gate.release()

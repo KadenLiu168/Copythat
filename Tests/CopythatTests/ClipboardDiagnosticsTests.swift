@@ -43,28 +43,6 @@ struct ClipboardDiagnosticsTests {
         #expect(!fileSummary.contentKeyDigest.contains("secret"))
     }
 
-    @Test func duplicateMetadataReportsMatchingItemsAndPinnedStatus() {
-        let duplicateID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-        let pinnedDuplicateID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
-        let differentID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
-        let pending = textItem(text: "same", sourceApp: "ChatGPT")
-        let duplicate = textItem(id: duplicateID, text: "same", sourceApp: "Doubao")
-        let pinnedDuplicate = textItem(id: pinnedDuplicateID, text: "same", sourceApp: "Safari", isPinned: true)
-        let different = textItem(id: differentID, text: "different", sourceApp: "ChatGPT")
-
-        let metadata = ClipboardDiagnostics.duplicateMetadata(
-            for: pending,
-            in: [duplicate, pinnedDuplicate, different]
-        )
-
-        #expect(metadata.count == 2)
-        #expect(metadata.itemIDs == [duplicateID, pinnedDuplicateID])
-        #expect(metadata.pinnedCount == 1)
-        #expect(metadata.itemIDList.contains(duplicateID.uuidString))
-        #expect(metadata.itemIDList.contains(pinnedDuplicateID.uuidString))
-        #expect(!metadata.itemIDList.contains(differentID.uuidString))
-    }
-
     @Test func sourceTimingEventsExposeAuditableMetadata() {
         let defaults = enabledDefaults()
         var events: [ClipboardDiagnostics.SourceTimingEvent] = []
@@ -172,21 +150,16 @@ struct ClipboardDiagnosticsTests {
         #expect(object["resolutionSlot"] as? String == "shortcut")
     }
 
-    private func textItem(
-        id: UUID = UUID(),
-        text: String,
-        sourceApp: String,
-        isPinned: Bool = false
-    ) -> ClipboardItem {
+    private func textItem(text: String, sourceApp: String) -> ClipboardItem {
         ClipboardItem(
-            id: id,
+            id: UUID(),
             kind: .text,
             title: text,
             preview: text,
             sourceApp: sourceApp,
             sourceAppIconData: nil,
             createdAt: Date(),
-            isPinned: isPinned,
+            isPinned: false,
             pinboardName: nil,
             textValue: text,
             fileURLs: [],

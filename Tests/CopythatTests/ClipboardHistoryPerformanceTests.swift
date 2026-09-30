@@ -52,7 +52,9 @@ struct ClipboardHistoryPerformanceTests {
             pasteboard: NSPasteboard.withUniqueName(),
             persistItems: { _ in }
         )
-        #expect(store.filteredItems.count == 500)
+        // Startup enforcement applies the unpinned-image bound to restored
+        // history: the newest 100 images survive alongside all 250 URL items.
+        #expect(store.filteredItems.count == 350)
         store.searchText = "Item 499"
         #expect(store.filteredItems.count == 1)
         store.searchText = ""
@@ -103,8 +105,10 @@ struct ClipboardHistoryPerformanceTests {
 
         let encoded = try JSONEncoder().encode(items)
         let decoded = try JSONDecoder().decode([ClipboardItem].self, from: encoded)
+        let defaults = temporaryDefaults()
+        defaults.set(1_000, forKey: "historyLimit")
         let store = ClipboardStore(
-            settings: AppSettings(defaults: temporaryDefaults()),
+            settings: AppSettings(defaults: defaults),
             sourceTracker: CopySourceTracker(),
             initialItems: decoded,
             pasteboard: NSPasteboard.withUniqueName(),
@@ -112,7 +116,7 @@ struct ClipboardHistoryPerformanceTests {
         )
 
         let allResults = store.filteredItems
-        store.searchText = "4997"
+        store.searchText = "Copythat history performance item 983"
         let searchResults = store.filteredItems
         store.searchText = ""
         store.selectedBoardID = Pinboard.pinned.id
@@ -121,7 +125,10 @@ struct ClipboardHistoryPerformanceTests {
         let workResults = store.filteredItems
 
         #expect(decoded.count == 5_000)
-        #expect(allResults.count == 5_000)
+        // Startup enforcement compacts restored history to the configured
+        // maximum, keeping every pinned item and the newest ordinary items.
+        #expect(store.items.count == 1_000)
+        #expect(allResults.count == 1_000)
         #expect(searchResults.count == 1)
         #expect(pinnedResults.count == 20)
         #expect(workResults.count == 10)
@@ -158,8 +165,10 @@ struct ClipboardHistoryPerformanceTests {
 
             #expect(recorder.count == 1_000, "each created item builds its corpus exactly once")
 
+            let defaults = temporaryDefaults()
+            defaults.set(1_000, forKey: "historyLimit")
             let store = ClipboardStore(
-                settings: AppSettings(defaults: temporaryDefaults()),
+                settings: AppSettings(defaults: defaults),
                 sourceTracker: CopySourceTracker(),
                 initialItems: items,
                 pasteboard: NSPasteboard.withUniqueName(),

@@ -238,6 +238,34 @@ struct ClipboardStoreDurableReleaseTests {
         #expect(store.items.count == 100)
     }
 
+    @Test func historyLimitReductionDropsEvictedProofsAndKeepsSurvivingOnes() async throws {
+        let environment = DurableReleaseHarness()
+        defer { environment.cleanup() }
+        environment.settings.historyLimit = 200
+        let survivingMedia = PreparedMedia(hashing: Data(repeating: 0xee, count: 96))
+        let evictedMedia = PreparedMedia(hashing: Data(repeating: 0xef, count: 96))
+        let survivingID = UUID(uuidString: "00000000-0000-0000-0000-0000000000ee")!
+        let evictedID = UUID(uuidString: "00000000-0000-0000-0000-0000000000ef")!
+        var initialItems: [ClipboardItem] = [imageItem(id: survivingID, media: survivingMedia)]
+        initialItems.append(contentsOf: (0..<198).map { textItem(index: $0) })
+        initialItems.append(imageItem(id: evictedID, media: evictedMedia))
+        let store = environment.makeStore(initialItems: initialItems)
+        store.panelDidOpen()
+
+        #expect(await environment.saveAndFlush(store))
+        #expect(store.pendingDurableMediaRelease[survivingID]?.imageBlobID == survivingMedia.id)
+        #expect(store.pendingDurableMediaRelease[evictedID]?.imageBlobID == evictedMedia.id)
+
+        environment.settings.historyLimit = 100
+        await waitForHistoryLimitEnforcement()
+
+        #expect(store.items.count == 100)
+        #expect(store.items.first?.id == survivingID)
+        #expect(!store.items.contains { $0.id == evictedID })
+        #expect(store.pendingDurableMediaRelease[evictedID] == nil, "an evicted item must not keep a pending proof")
+        #expect(store.pendingDurableMediaRelease[survivingID]?.imageBlobID == survivingMedia.id)
+    }
+
     @Test func replacedLinkImageDropsOnlyItsOwnPendingRole() async throws {
         let environment = DurableReleaseHarness()
         defer { environment.cleanup() }
@@ -278,6 +306,11 @@ struct ClipboardStoreDurableReleaseTests {
     }
 
     // MARK: - Fixtures
+
+    private func waitForHistoryLimitEnforcement() async {
+        await Task.yield()
+        await Task.yield()
+    }
 
     private func imageItem(id: UUID, media: PreparedMedia) -> ClipboardItem {
         ClipboardItem(

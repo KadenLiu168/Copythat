@@ -69,15 +69,6 @@ struct ClipboardDiagnostics {
         )
     }
 
-    static func duplicateMetadata(for item: ClipboardItem, in items: [ClipboardItem]) -> DuplicateMetadata {
-        let matches = items.filter { $0.contentKey == item.contentKey }
-        return DuplicateMetadata(
-            count: matches.count,
-            itemIDs: matches.map(\.id),
-            pinnedCount: matches.filter(\.isPinned).count
-        )
-    }
-
     func logCapture(
         kind: ClipboardKind,
         source: ClipboardSource,
@@ -86,7 +77,10 @@ struct ClipboardDiagnostics {
     ) {
         guard isEnabled else { return }
         logger.info(
-            "capture kind=\(kind.rawValue, privacy: .public) source=\(source.appName, privacy: .public) currentChangeCount=\(currentChangeCount, privacy: .public) changeCountDelta=\(changeCountDelta, privacy: .public)"
+            """
+            capture kind=\(kind.rawValue, privacy: .public) source=\(source.appName, privacy: .public) \
+            currentChangeCount=\(currentChangeCount, privacy: .public) changeCountDelta=\(changeCountDelta, privacy: .public)
+            """
         )
     }
 
@@ -150,12 +144,17 @@ struct ClipboardDiagnostics {
         item: ClipboardItem,
         beforeCount: Int,
         afterCount: Int,
-        duplicateMetadata: DuplicateMetadata
+        duplicateSummary: ClipboardHistoryPolicy.DuplicateSummary
     ) {
         guard isEnabled else { return }
         let summary = contentSummary(for: item)
         logger.info(
-            "insert itemID=\(item.id.uuidString, privacy: .public) kind=\(summary.kind, privacy: .public) source=\(item.sourceApp, privacy: .public) contentLength=\(summary.contentLength, privacy: .public) contentKeyDigest=\(summary.contentKeyDigest, privacy: .public) duplicateCount=\(duplicateMetadata.count, privacy: .public) duplicatePinnedCount=\(duplicateMetadata.pinnedCount, privacy: .public) duplicateIDs=\(duplicateMetadata.itemIDList, privacy: .public) beforeCount=\(beforeCount, privacy: .public) afterCount=\(afterCount, privacy: .public)"
+            """
+            insert itemID=\(item.id.uuidString, privacy: .public) kind=\(summary.kind, privacy: .public) source=\(item.sourceApp, privacy: .public) \
+            contentLength=\(summary.contentLength, privacy: .public) contentKeyDigest=\(summary.contentKeyDigest, privacy: .public) \
+            duplicateCount=\(duplicateSummary.count, privacy: .public) duplicatePinnedCount=\(duplicateSummary.pinnedCount, privacy: .public) \
+            duplicateIDs=\(duplicateSummary.itemIDList, privacy: .public) beforeCount=\(beforeCount, privacy: .public) afterCount=\(afterCount, privacy: .public)
+            """
         )
     }
 
@@ -257,15 +256,5 @@ extension ClipboardDiagnostics {
         let kind: String
         let contentLength: Int
         let contentKeyDigest: String
-    }
-
-    struct DuplicateMetadata: Equatable {
-        let count: Int
-        let itemIDs: [UUID]
-        let pinnedCount: Int
-
-        var itemIDList: String {
-            itemIDs.map(\.uuidString).joined(separator: ",")
-        }
     }
 }
