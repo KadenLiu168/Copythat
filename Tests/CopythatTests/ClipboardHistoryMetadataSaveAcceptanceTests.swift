@@ -41,28 +41,53 @@ struct ClipboardHistoryMetadataSaveAcceptanceTests {
     }
 
     @Test func residentStoreMetadataMutationsCommitWithoutMediaWork() async throws {
-        try await expectStoreMutationsCommitWithoutMediaWork(lazilyRestored: false)
+        try await expectStoreMutationsCommitWithoutMediaWork(source: .resident)
     }
 
     @Test func lazyRestoredStoreMetadataMutationsCommitWithoutMediaWork() async throws {
-        try await expectStoreMutationsCommitWithoutMediaWork(lazilyRestored: true)
+        try await expectStoreMutationsCommitWithoutMediaWork(source: .restoredReferenceOnly)
     }
 
-    private func expectStoreMutationsCommitWithoutMediaWork(lazilyRestored: Bool) async throws {
+    @Test func durablyReleasedStoreMetadataMutationsCommitWithoutMediaWork() async throws {
+        try await expectStoreMutationsCommitWithoutMediaWork(source: .durablyReleased)
+    }
+
+    private func expectStoreMutationsCommitWithoutMediaWork(source: MediaSource) async throws {
         let environment = try AcceptanceEnvironment()
         defer { environment.cleanup() }
         let items = environment.makeMixedItems(count: Self.itemCount)
         try environment.persistence.save(items)
-        let storeItems = lazilyRestored ? try environment.persistence.loadItems() : items
-        if lazilyRestored {
+
+        let storeItems: [ClipboardItem]
+        switch source {
+        case .resident:
+            storeItems = items
+        case .restoredReferenceOnly:
+            storeItems = try environment.persistence.loadItems()
             #expect(storeItems.allSatisfy { $0.imageData == nil && $0.linkImageData == nil })
             #expect(storeItems.contains { $0.imageBlobID != nil })
+        case .durablyReleased:
+            storeItems = items
         }
 
-        let store = environment.makeStore(initialItems: storeItems)
+        let store = environment.makeStore(
+            initialItems: storeItems,
+            installsDurableMediaHandler: source == .durablyReleased
+        )
         let imageItem = try #require(store.items.first { $0.kind == .image && $0.imageBlobID != nil })
         let previewItem = try #require(store.items.first { $0.linkImageBlobID != nil })
         let textItem = try #require(store.items.first { $0.kind == .text })
+        let committedImageBlobID = imageItem.imageBlobID
+        let committedPreviewBlobID = previewItem.linkImageBlobID
+
+        if source == .durablyReleased {
+            #expect(await environment.commit(store))
+            #expect(
+                store.items.allSatisfy { $0.imageData == nil && $0.linkImageData == nil },
+                "a durable commit releases resident media from history"
+            )
+            #expect(store.filteredItems.allSatisfy { $0.imageData == nil && $0.linkImageData == nil })
+        }
 
         try await expectMetadataOnlyMutation(environment, mutation: "pin") {
             store.togglePin(imageItem)
@@ -87,6 +112,14 @@ struct ClipboardHistoryMetadataSaveAcceptanceTests {
         #expect(store.items.first { $0.id == previewItem.id }?.pinboardName == "Later")
         #expect(store.items.first { $0.id == textItem.id } == nil)
         #expect(store.items.first { $0.id == previewItem.id }?.linkTitle == "Renamed preview")
+        // Blob references and content identity survive release and mutation.
+        #expect(store.items.first { $0.id == imageItem.id }?.imageBlobID == committedImageBlobID)
+        #expect(store.items.first { $0.id == previewItem.id }?.linkImageBlobID == committedPreviewBlobID)
+        if source == .durablyReleased {
+            #expect(try environment.manifest().version == 2, "release keeps the V2 schema")
+            #expect(store.items.first { $0.id == imageItem.id }?.imageData == nil)
+            #expect(store.items.first { $0.id == previewItem.id }?.linkImageData == nil)
+        }
         expectPairedMedia(store.items)
         let restored = try environment.persistence.loadItems()
         #expect(restored.count == Self.itemCount - 1)
@@ -195,10 +228,13 @@ private final class AcceptanceEnvironment {
         defaults.removePersistentDomain(forName: defaultsName)
     }
 
-    func makeStore(initialItems: [ClipboardItem]) -> ClipboardStore {
+    func makeStore(
+        initialItems: [ClipboardItem],
+        installsDurableMediaHandler: Bool = false
+    ) -> ClipboardStore {
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
-        return ClipboardStore(
+        let store = ClipboardStore(
             settings: AppSettings(defaults: defaults),
             sourceTracker: CopySourceTracker(),
             initialItems: initialItems,
@@ -208,6 +244,18 @@ private final class AcceptanceEnvironment {
             fetchLinkMetadata: { _ in throw URLError(.unsupportedURL) },
             fetchLinkSnapshot: { _ in throw URLError(.unsupportedURL) }
         )
+        if installsDurableMediaHandler {
+            coordinator.setDurableMediaHandler { [weak store] commit in
+                await store?.handleDurableMediaCommit(commit)
+            }
+        }
+        return store
+    }
+
+    /// Persists the store's current history, as a metadata mutation would.
+    func commit(_ store: ClipboardStore) async -> Bool {
+        coordinator.requestSave(store.items)
+        return await coordinator.flush()
     }
 
     func flush() async -> Bool {
@@ -258,8 +306,15 @@ private final class AcceptanceEnvironment {
     }
 }
 
-private struct Manifest: Decodable {
-    struct Item: Decodable {
+/// Where a scenario's heavy media came from, so resident, lazily restored, and
+/// durably released coverage stay separate cases.
+private enum MediaSource {
+    case resident
+    case restoredReferenceOnly
+    case durablyReleased
+}
+
+private struct Manifest: Decodable {    struct Item: Decodable {
         let id: UUID
         let isPinned: Bool
         let pinboardName: String?
@@ -297,9 +352,9 @@ private struct NSImagePixels {
             blue: CGFloat((seed % 3) + 1) / 4,
             alpha: 1
         )
-        for x in 0..<size {
-            for y in 0..<size {
-                bitmap.setColor(color, atX: x, y: y)
+        for column in 0..<size {
+            for row in 0..<size {
+                bitmap.setColor(color, atX: column, y: row)
             }
         }
         let image = NSImage(size: NSSize(width: size, height: size))

@@ -232,6 +232,56 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         )
     }
 
+    /// Drops resident heavy media whose blob identity a successful save has
+    /// durably committed, keeping every reference, all metadata, source icons,
+    /// and content identity unchanged. Each role is evaluated independently:
+    /// a role with no resident bytes, no current address, or a nonmatching
+    /// durable address keeps its bytes.
+    ///
+    /// Returns nil when nothing was released, so ownership changes are decided
+    /// without comparing fields. The reconstruction forwards the addresses it
+    /// already knows, which never re-hashes media.
+    func releasingResidentMedia(
+        durableImageBlobID: String?,
+        durableLinkImageBlobID: String?
+    ) -> ClipboardItem? {
+        let releasesImage = matchesResidentMedia(
+            data: imageData,
+            blobID: imageBlobID,
+            durableBlobID: durableImageBlobID
+        )
+        let releasesLinkImage = matchesResidentMedia(
+            data: linkImageData,
+            blobID: linkImageBlobID,
+            durableBlobID: durableLinkImageBlobID
+        )
+        guard releasesImage || releasesLinkImage else { return nil }
+        return ClipboardItem(
+            id: id,
+            kind: kind,
+            title: title,
+            preview: preview,
+            sourceApp: sourceApp,
+            sourceAppIconData: sourceAppIconData,
+            sourceAppIconBlobID: sourceAppIconBlobID,
+            createdAt: createdAt,
+            isPinned: isPinned,
+            pinboardName: pinboardName,
+            textValue: textValue,
+            fileURLs: fileURLs,
+            imageData: releasesImage ? nil : imageData,
+            imageBlobID: imageBlobID,
+            linkTitle: linkTitle,
+            linkImageData: releasesLinkImage ? nil : linkImageData,
+            linkImageBlobID: linkImageBlobID
+        )
+    }
+
+    private func matchesResidentMedia(data: Data?, blobID: String?, durableBlobID: String?) -> Bool {
+        guard data != nil, let blobID, let durableBlobID else { return false }
+        return blobID == durableBlobID
+    }
+
     /// Storage optimization for raw or unbounded media. Unchanged bytes keep
     /// their address, changed output receives a new one, and a conversion that
     /// yields no payload clears the pair. Reference-only media has no bytes to

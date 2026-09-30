@@ -68,6 +68,12 @@ final class AppModel: ObservableObject {
             persistItems: { historySaveCoordinator.requestSave($0) }
         )
         self.store = store
+        // The store's loader is the same blob store this persistence writes to,
+        // so committed bytes it seeds are the bytes display, paste, and drag
+        // read back. A weak capture keeps the callback from retaining the store.
+        historySaveCoordinator.setDurableMediaHandler { [weak store] commit in
+            await store?.handleDurableMediaCommit(commit)
+        }
         // D2: the tracker reports copy intent only; the store owns polling, stability,
         // and capture. Weak capture avoids a tracker → closure → store → tracker cycle.
         sourceTracker.onCopyIntentWake = { [weak store] in

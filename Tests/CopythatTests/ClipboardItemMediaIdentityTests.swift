@@ -114,8 +114,130 @@ struct ClipboardItemMediaIdentityTests {
         #expect(counters.identityHashCount == 3)
     }
 
-    private func makeItem(
-        sourceIcon: Data? = nil,
+    @Test func releasingResidentMediaTreatsEachRoleIndependently() async {
+        let counters = MediaOperationCounters()
+        let image = PreparedMedia(hashing: Data(repeating: 0xa1, count: 200))
+        let linkImage = PreparedMedia(hashing: Data(repeating: 0xa2, count: 120))
+        let unrelated = sha256Hex(Data(repeating: 0xa3, count: 40))
+        let item = makeItem(
+            imageData: image.data,
+            imageBlobID: image.id,
+            linkImageData: linkImage.data,
+            linkImageBlobID: linkImage.id
+        )
+
+        counters.reset()
+        let imageOnly = await counters.measure {
+            item.releasingResidentMedia(durableImageBlobID: image.id, durableLinkImageBlobID: nil)
+        }
+        let linkOnly = await counters.measure {
+            item.releasingResidentMedia(durableImageBlobID: nil, durableLinkImageBlobID: linkImage.id)
+        }
+        let both = await counters.measure {
+            item.releasingResidentMedia(durableImageBlobID: image.id, durableLinkImageBlobID: linkImage.id)
+        }
+        let nonmatching = await counters.measure {
+            item.releasingResidentMedia(durableImageBlobID: unrelated, durableLinkImageBlobID: unrelated)
+        }
+        let absent = await counters.measure {
+            item.releasingResidentMedia(durableImageBlobID: nil, durableLinkImageBlobID: nil)
+        }
+
+        #expect(imageOnly?.imageData == nil)
+        #expect(imageOnly?.imageBlobID == image.id)
+        #expect(imageOnly?.linkImageData == linkImage.data, "an absent durable role must not release the other role")
+
+        #expect(linkOnly?.linkImageData == nil)
+        #expect(linkOnly?.linkImageBlobID == linkImage.id)
+        #expect(linkOnly?.imageData == image.data)
+
+        #expect(both?.imageData == nil)
+        #expect(both?.linkImageData == nil)
+        #expect(nonmatching == nil, "a different identity must not release resident bytes")
+        #expect(absent == nil, "no durable identity means no release")
+        #expect(counters.mediaHashCount == 0)
+    }
+
+    @Test func releasingResidentMediaLeavesReferenceOnlyItemsUntouchedWithoutHashing() async {
+        let counters = MediaOperationCounters()
+        let imageReference = sha256Hex(Data(repeating: 0xb1, count: 64))
+        let linkReference = sha256Hex(Data(repeating: 0xb2, count: 64))
+        let referenceOnly = makeItem(imageBlobID: imageReference, linkImageBlobID: linkReference)
+        let empty = makeItem()
+
+        counters.reset()
+        let releasedReferenceOnly = await counters.measure {
+            referenceOnly.releasingResidentMedia(
+                durableImageBlobID: imageReference,
+                durableLinkImageBlobID: linkReference
+            )
+        }
+        let releasedEmpty = await counters.measure {
+            empty.releasingResidentMedia(durableImageBlobID: nil, durableLinkImageBlobID: nil)
+        }
+
+        #expect(releasedReferenceOnly == nil)
+        #expect(releasedEmpty == nil)
+        #expect(counters.mediaHashCount == 0)
+    }
+
+    @Test func releasingBothRolesPreservesIdentityMetadataAndSearch() async {
+        let counters = MediaOperationCounters()
+        let icon = PreparedMedia(hashing: Data(repeating: 0xc1, count: 48))
+        let image = PreparedMedia(hashing: Data(repeating: 0xc2, count: 220))
+        let linkImage = PreparedMedia(hashing: Data(repeating: 0xc3, count: 140))
+        let fileURL = URL(fileURLWithPath: "/tmp/copythat-release-fixture.txt")
+        let item = ClipboardItem(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000000c9")!,
+            kind: .image,
+            title: "Release fixture",
+            preview: "Release preview",
+            sourceApp: "Fixture",
+            sourceAppIconData: icon.data,
+            sourceAppIconBlobID: icon.id,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_300),
+            isPinned: true,
+            pinboardName: "Work",
+            textValue: "https://example.com/release",
+            fileURLs: [fileURL],
+            imageData: image.data,
+            imageBlobID: image.id,
+            linkTitle: "Release link",
+            linkImageData: linkImage.data,
+            linkImageBlobID: linkImage.id
+        )
+
+        counters.reset()
+        let released = await counters.measure {
+            item.releasingResidentMedia(durableImageBlobID: image.id, durableLinkImageBlobID: linkImage.id)
+        }
+        let restored = try? #require(released)
+
+        #expect(restored?.id == item.id)
+        #expect(restored?.kind == item.kind)
+        #expect(restored?.title == item.title)
+        #expect(restored?.preview == item.preview)
+        #expect(restored?.sourceApp == item.sourceApp)
+        #expect(restored?.sourceAppIconData == icon.data)
+        #expect(restored?.sourceAppIconBlobID == icon.id)
+        #expect(restored?.createdAt == item.createdAt)
+        #expect(restored?.isPinned == true)
+        #expect(restored?.pinboardName == "Work")
+        #expect(restored?.textValue == item.textValue)
+        #expect(restored?.fileURLs == [fileURL])
+        #expect(restored?.linkTitle == "Release link")
+        #expect(restored?.imageData == nil)
+        #expect(restored?.imageBlobID == image.id)
+        #expect(restored?.linkImageData == nil)
+        #expect(restored?.linkImageBlobID == linkImage.id)
+        #expect(restored?.contentKey == item.contentKey)
+        #expect(restored?.searchText == item.searchText)
+        #expect(restored?.hasImagePayload == true)
+        #expect(restored?.hasLinkImagePayload == true)
+        #expect(counters.mediaHashCount == 0, "release must not re-hash any payload")
+    }
+
+    private func makeItem(        sourceIcon: Data? = nil,
         imageData: Data? = nil,
         imageBlobID: String? = nil,
         linkImageData: Data? = nil,

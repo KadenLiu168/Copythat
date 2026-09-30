@@ -270,6 +270,121 @@ struct ClipboardHistoryMediaLoaderTests {
         )
     }
 
+    @Test func seededCommittedMediaIsReusedWithoutDiskReadsOrHashes() async throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = LoaderReadRecorder()
+        let loader = ClipboardHistoryMediaLoader(
+            blobStore: ClipboardHistoryBlobStore(directoryURL: directory, readData: recorder.read),
+            byteBudget: 10_000
+        )
+        let prepared = PreparedMedia(hashing: Data(repeating: 0x61, count: 256))
+        try prepared.data.write(to: directory.appendingPathComponent("\(prepared.id).blob"))
+
+        let counters = MediaOperationCounters()
+        await counters.measure { await loader.seedCommitted([prepared]) }
+        #expect(counters.mediaHashCount == 0, "seeding must not hash committed bytes")
+
+        counters.reset()
+        let loaded = try await counters.measure { try await loader.load(blobID: prepared.id) }
+
+        #expect(loaded == prepared.data)
+        #expect(recorder.reads().isEmpty, "a seeded hit must not read disk")
+        #expect(counters.mediaHashCount == 0, "a seeded hit must not verify or re-identify bytes")
+        #expect(await loader.retainedByteCost == prepared.data.count)
+        AcceptanceMetrics.record(
+            scenario: "media-loader",
+            metric: "diskReadsForSeededCommittedMedia",
+            expected: "0",
+            observed: "\(recorder.reads().count)"
+        )
+    }
+
+    @Test func seedingAccountsRepeatedIdentitiesOnce() async throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = LoaderReadRecorder()
+        let loader = ClipboardHistoryMediaLoader(
+            blobStore: ClipboardHistoryBlobStore(directoryURL: directory, readData: recorder.read),
+            byteBudget: 250
+        )
+        let first = PreparedMedia(hashing: Data(repeating: 0x62, count: 100))
+        let second = PreparedMedia(hashing: Data(repeating: 0x63, count: 100))
+        for prepared in [first, second] {
+            try prepared.data.write(to: directory.appendingPathComponent("\(prepared.id).blob"))
+        }
+
+        await loader.seedCommitted([first, first, second])
+
+        #expect(await loader.retainedByteCost == 200, "a repeated identity must cost its bytes once")
+        #expect(try await loader.load(blobID: first.id) == first.data)
+        #expect(try await loader.load(blobID: second.id) == second.data)
+        #expect(recorder.reads().isEmpty)
+    }
+
+    @Test func seedingEvictsLeastRecentlySeededEntriesWithinBudget() async throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = LoaderReadRecorder()
+        let loader = ClipboardHistoryMediaLoader(
+            blobStore: ClipboardHistoryBlobStore(directoryURL: directory, readData: recorder.read),
+            byteBudget: 250
+        )
+        let oldest = PreparedMedia(hashing: Data(repeating: 0x64, count: 100))
+        let middle = PreparedMedia(hashing: Data(repeating: 0x65, count: 100))
+        let newest = PreparedMedia(hashing: Data(repeating: 0x66, count: 100))
+        for prepared in [oldest, middle, newest] {
+            try prepared.data.write(to: directory.appendingPathComponent("\(prepared.id).blob"))
+        }
+
+        await loader.seedCommitted([oldest, middle, newest])
+
+        #expect(await loader.retainedByteCost == 200)
+        #expect(await loader.retainedByteCost <= 250, "byte accounting must stay within budget")
+        // The newest entries were seeded last, so the oldest one is the eviction
+        // candidate and a release of it can still be read back from disk.
+        #expect(try await loader.load(blobID: newest.id) == newest.data)
+        #expect(try await loader.load(blobID: middle.id) == middle.data)
+        #expect(recorder.reads().isEmpty)
+        #expect(try await loader.load(blobID: oldest.id) == oldest.data)
+        #expect(recorder.reads() == ["\(oldest.id).blob"])
+    }
+
+    @Test func oversizedSeedIsSkippedAndItsAccessStaysAVerifiedDiskRead() async throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = LoaderReadRecorder()
+        let loader = ClipboardHistoryMediaLoader(
+            blobStore: ClipboardHistoryBlobStore(directoryURL: directory, readData: recorder.read),
+            byteBudget: 250
+        )
+        let first = PreparedMedia(hashing: Data(repeating: 0x67, count: 100))
+        let second = PreparedMedia(hashing: Data(repeating: 0x68, count: 100))
+        let oversized = PreparedMedia(hashing: Data(repeating: 0x69, count: 500))
+        for prepared in [first, second, oversized] {
+            try prepared.data.write(to: directory.appendingPathComponent("\(prepared.id).blob"))
+        }
+
+        await loader.seedCommitted([first, second, oversized])
+
+        #expect(await loader.retainedByteCost == 200, "an impossible insertion must not displace useful entries")
+        #expect(try await loader.load(blobID: first.id) == first.data)
+        #expect(try await loader.load(blobID: second.id) == second.data)
+        #expect(recorder.reads().isEmpty)
+
+        let counters = MediaOperationCounters()
+        let loaded = try await counters.measure { try await loader.load(blobID: oversized.id) }
+        #expect(loaded == oversized.data)
+        #expect(recorder.reads() == ["\(oversized.id).blob"])
+        #expect(counters.integrityHashCount == 1, "an uncached oversized payload is verified on read")
+        #expect(await loader.retainedByteCost == 200)
+
+        try Data([0x00]).write(to: directory.appendingPathComponent("\(oversized.id).blob"))
+        await #expect(throws: (any Error).self) {
+            try await loader.load(blobID: oversized.id)
+        }
+    }
+
     private func makeDirectory() -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ClipboardHistoryMediaLoaderTests-\(UUID().uuidString)", isDirectory: true)

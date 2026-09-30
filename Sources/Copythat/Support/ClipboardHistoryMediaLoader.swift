@@ -41,6 +41,26 @@ actor ClipboardHistoryMediaLoader {
         return data
     }
 
+    /// Accepts trusted media whose bytes and identity were finalized by their
+    /// producer and durably committed by the save transaction, using the same
+    /// insertion, recency, and byte-cost accounting as a verified load.
+    ///
+    /// Seeding performs no disk read, hash, decode, or encode. Repeated
+    /// identities occupy one entry, and a payload that alone exceeds the budget
+    /// is skipped without evicting useful entries. A single batch is offered
+    /// oldest-first, so the newest entries stay most recent under pressure.
+    func seedCommitted(_ media: [PreparedMedia]) {
+        for prepared in media where prepared.data.count <= byteBudget {
+            insert(prepared.id, prepared.data)
+        }
+    }
+
+    /// Retained byte cost, so tests can assert the budget invariant directly
+    /// instead of inferring it from eviction behavior.
+    var retainedByteCost: Int {
+        cachedByteCost
+    }
+
     private func touch(_ blobID: String) {
         recency.removeAll { $0 == blobID }
         recency.append(blobID)

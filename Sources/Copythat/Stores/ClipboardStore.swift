@@ -86,6 +86,20 @@ final class ClipboardStore: ObservableObject {
     private var deletedContentKeys: [String] = []
     private let maxDeletedContentKeys = 256
 
+    /// Blob identities one successful commit authorized for an item. Roles are
+    /// independent: a receipt carrying only one role never clears the other.
+    struct DurableMediaReferences: Equatable {
+        var imageBlobID: String?
+        var linkImageBlobID: String?
+    }
+
+    /// Committed heavy media awaiting release. Entries hold references only —
+    /// an item's UUID plus the blob identities its commit covered — and never
+    /// Data, prepared payloads, snapshots, or closures capturing them. Release
+    /// handling lives in `ClipboardStore+DurableMediaRelease.swift`, so this
+    /// stays internal for the same-module extension.
+    var pendingDurableMediaRelease: [UUID: DurableMediaReferences] = [:]
+
     // Link preview orchestration state. Extensitivity lives in
     // `ClipboardStore+LinkPreview.swift`; visibility here stays internal so the
     // same-module extension can operate on the single source of truth.
@@ -123,6 +137,21 @@ final class ClipboardStore: ObservableObject {
     /// internal helper so the orchestration extension can replace single items.
     func updateItem(at index: Int, transform: (ClipboardItem) -> ClipboardItem) {
         items[index] = transform(items[index])
+    }
+
+    /// Publishes the released copies produced by the durable-media extension,
+    /// which cannot write these private setters from another file. A nil array
+    /// changed nothing and is left untouched, so each is assigned at most once.
+    func publishReleasedResidentMedia(
+        items releasedItems: [ClipboardItem]?,
+        filteredItems releasedFilteredItems: [ClipboardItem]?
+    ) {
+        if let releasedItems {
+            items = releasedItems
+        }
+        if let releasedFilteredItems {
+            filteredItems = releasedFilteredItems
+        }
     }
 
     init(
@@ -193,10 +222,13 @@ final class ClipboardStore: ObservableObject {
 
     /// Called by PanelWindowController before the window is ordered out. Closing
     /// revokes eligibility first so NSHostingView retention cannot keep a
-    /// fallback alive, and metadata enrichment continues.
+    /// fallback alive, and metadata enrichment continues. Revoking visibility is
+    /// also the ownership boundary that releases committed heavy media deferred
+    /// while the panel was visible.
     func panelDidClose() {
         panelVisible = false
         panelAuthorizationGeneration += 1
+        consumePendingDurableMediaRelease()
         if let itemID = activeFallback?.request.target.itemID ?? selectedID {
             diagnostics.logLinkPreview(itemID: itemID, outcome: .panelClosed, uptime: uptimeProvider())
         }
@@ -308,7 +340,9 @@ extension ClipboardStore {
             cancelPendingImageEncoding()
             clearSystemPasteboardIfMatching(removedItems)
             items.removeAll { $0.id == item.id }
-            cleanupLinkPreviewWork(forRemovedItemIDs: removedItems.map(\.id))
+            let removedIDs = removedItems.map(\.id)
+            cleanupLinkPreviewWork(forRemovedItemIDs: removedIDs)
+            discardPendingDurableMediaRelease(forRemovedItemIDs: removedIDs)
             refreshFilteredItems()
             saveItems()
         }
@@ -332,6 +366,7 @@ extension ClipboardStore {
             }
 
             cleanupLinkPreviewWork(forRemovedItemIDs: removedItems.map(\.id))
+            discardPendingDurableMediaRelease(forRemovedItemIDs: removedItems.map(\.id))
             refreshFilteredItems()
             saveItems()
             return removedItems.count
@@ -355,7 +390,13 @@ extension ClipboardStore {
     /// coordination and media blob handling stay in one place.
     func applyLinkPreview(itemID: UUID, title: String?, linkImage: PreparedMedia?) {
         guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        let previousLinkImageBlobID = items[index].linkImageBlobID
         items[index] = items[index].withLinkPreview(title: title, linkImage: linkImage)
+        if items[index].linkImageBlobID != previousLinkImageBlobID {
+            // A replaced identity invalidates the old role's proof; the item's
+            // image role and a later commit for the new pair are unaffected.
+            discardPendingDurableMediaRelease(itemID: itemID, droppingLinkImage: true)
+        }
         refreshFilteredItems()
         saveItems()
     }
@@ -457,6 +498,7 @@ extension ClipboardStore {
             )
             let removedIDs = beforeIDs.subtracting(insertion.items.map(\.id))
             cleanupLinkPreviewWork(forRemovedItemIDs: Array(removedIDs))
+            discardPendingDurableMediaRelease(forRemovedItemIDs: Array(removedIDs))
             refreshFilteredItems()
             selectedID = insertion.selectedID
             saveItems()
