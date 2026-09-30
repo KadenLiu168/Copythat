@@ -50,6 +50,70 @@ private extension ClipboardSource {
     }
 }
 
+/// Identity of one running application process generation. A process
+/// identifier alone can be reused by a later launch, so the captured launch
+/// date distinguishes generations and the bundle location distinguishes
+/// installations; a display name is never part of this identity.
+struct SourceAppIconCacheKey: Hashable {
+    let processIdentifier: pid_t
+    let launchDate: Date
+    let bundleURL: URL?
+
+    /// Missing process-generation metadata yields no key, so that observation
+    /// stays uncached instead of risking a collision with a later process.
+    init?(processIdentifier: pid_t, launchDate: Date?, bundleURL: URL?) {
+        guard processIdentifier > 0, let launchDate else { return nil }
+        self.processIdentifier = processIdentifier
+        self.launchDate = launchDate
+        self.bundleURL = bundleURL
+    }
+}
+
+/// Session-only cache of successfully prepared source icons, bounded to
+/// `capacity` entries with least-recently-used eviction. A hit refreshes the
+/// entry's recency and returns the retained value without running the loader; a
+/// miss runs the loader at most once and retains only a successful result.
+struct SourceAppIconCache {
+    let capacity: Int
+    private var entries: [SourceAppIconCacheKey: PreparedMedia] = [:]
+    private var recency: [SourceAppIconCacheKey] = []
+
+    init(capacity: Int = 32) {
+        precondition(capacity > 0, "a source icon cache needs a positive capacity")
+        self.capacity = capacity
+    }
+
+    var count: Int { entries.count }
+
+    mutating func prepared(
+        forKey key: SourceAppIconCacheKey,
+        prepare: () -> PreparedMedia?
+    ) -> PreparedMedia? {
+        if let retained = entries[key] {
+            markMostRecent(key)
+            return retained
+        }
+
+        guard let prepared = prepare() else { return nil }
+        entries[key] = prepared
+        markMostRecent(key)
+        if entries.count > capacity, let leastRecent = recency.first {
+            recency.removeFirst()
+            entries[leastRecent] = nil
+        }
+        return prepared
+    }
+
+    /// Recency holds at most one occurrence per key, so eviction always sees
+    /// the true least recently used entry.
+    private mutating func markMostRecent(_ key: SourceAppIconCacheKey) {
+        if let index = recency.firstIndex(of: key) {
+            recency.remove(at: index)
+        }
+        recency.append(key)
+    }
+}
+
 final class CopySourceTracker {
     // Narrow copy-intent wake signal; wired by AppModel to the clipboard store.
     var onCopyIntentWake: (() -> Void)?
@@ -70,6 +134,7 @@ final class CopySourceTracker {
     private var recentExternalSource: ClipboardSource?
     private var lastActivation: (source: ClipboardSource, pasteboardChangeCount: Int)?
     private var frontmostBeforeLastActivation: ClipboardSource?
+    private var sourceIconCache = SourceAppIconCache()
     private let frontmostSourceProvider: (() -> ClipboardSource?)?
     private let diagnostics: ClipboardDiagnostics
 
@@ -396,18 +461,58 @@ final class CopySourceTracker {
             return nil
         }
 
-        let iconData: Data?
-        if let bundlePath = app.bundleURL?.path {
-            iconData = NSWorkspace.shared.icon(forFile: bundlePath).appIconPNGData(maxPixel: 160)
+        return makeSource(
+            appName: name,
+            cacheKey: SourceAppIconCacheKey(
+                processIdentifier: app.processIdentifier,
+                launchDate: app.launchDate,
+                bundleURL: app.bundleURL
+            ),
+            capturedAt: capturedAt,
+            pasteboardChangeCount: pasteboardChangeCount,
+            prepareIcon: { Self.preparedIcon(for: app) }
+        )
+    }
+
+    /// Assembles one source observation from validated application metadata.
+    /// The icon is prepared lazily, at most once per uncached observation, and
+    /// a retained prepared value contributes both its bytes and its established
+    /// content address, so a hit hashes nothing. An unreliable process
+    /// generation prepares normally without touching the cache.
+    func makeSource(
+        appName: String,
+        cacheKey: SourceAppIconCacheKey?,
+        capturedAt: Date,
+        pasteboardChangeCount: Int? = nil,
+        prepareIcon: () -> PreparedMedia?
+    ) -> ClipboardSource {
+        let prepared: PreparedMedia?
+        if let cacheKey {
+            prepared = sourceIconCache.prepared(forKey: cacheKey, prepare: prepareIcon)
         } else {
-            iconData = app.icon?.appIconPNGData(maxPixel: 160)
+            prepared = prepareIcon()
         }
 
         return ClipboardSource(
-            appName: name,
-            iconData: iconData,
+            appName: appName,
+            iconData: prepared?.data,
+            iconBlobID: prepared?.id,
             capturedAt: capturedAt,
             pasteboardChangeCount: pasteboardChangeCount
         )
+    }
+
+    /// Existing icon selection and bounded PNG preparation: a bundle location
+    /// uses the workspace icon, and an unavailable application icon yields no
+    /// icon.
+    private static func preparedIcon(for app: NSRunningApplication) -> PreparedMedia? {
+        let pngData: Data?
+        if let bundlePath = app.bundleURL?.path {
+            pngData = NSWorkspace.shared.icon(forFile: bundlePath).appIconPNGData(maxPixel: 160)
+        } else {
+            pngData = app.icon?.appIconPNGData(maxPixel: 160)
+        }
+
+        return pngData.map { PreparedMedia(hashing: $0) }
     }
 }
