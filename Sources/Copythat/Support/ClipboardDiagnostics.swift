@@ -10,6 +10,7 @@ struct ClipboardDiagnostics {
     private let logger: Logger
     private let eventSink: ((SourceTimingEvent) -> Void)?
     private let linkPreviewEventSink: ((LinkPreviewEvent) -> Void)?
+    private let imagePipelineEventSink: ((ImagePipelineEvent) -> Void)?
 
     init(
         defaults: UserDefaults = .standard,
@@ -18,12 +19,42 @@ struct ClipboardDiagnostics {
             category: ClipboardDiagnostics.category
         ),
         eventSink: ((SourceTimingEvent) -> Void)? = nil,
-        linkPreviewEventSink: ((LinkPreviewEvent) -> Void)? = nil
+        linkPreviewEventSink: ((LinkPreviewEvent) -> Void)? = nil,
+        imagePipelineEventSink: ((ImagePipelineEvent) -> Void)? = nil
     ) {
         self.defaults = defaults
         self.logger = logger
         self.eventSink = eventSink
         self.linkPreviewEventSink = linkPreviewEventSink
+        self.imagePipelineEventSink = imagePipelineEventSink
+    }
+
+    /// Emits one bounded-overflow event per discarded waiting capture. Records
+    /// queue metadata only — sequence, change count, depth, source app and
+    /// timing — never clipboard text, paths, image bytes, or a content hash.
+    /// `queueDepth` is the total buffered depth after the replacement.
+    func logImageEncodingOverflow(
+        sequence: Int,
+        changeCount: Int,
+        sourceApp: String,
+        queueDepth: Int,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        guard isEnabled else { return }
+        let event = ImagePipelineEvent(
+            event: .imageEncodingOverflow,
+            uptime: uptime,
+            sequence: sequence,
+            changeCount: changeCount,
+            queueDepth: queueDepth,
+            sourceApp: sourceApp
+        )
+        if let imagePipelineEventSink {
+            imagePipelineEventSink(event)
+            return
+        }
+        guard let message = try? event.jsonLine() else { return }
+        logger.info("image_pipeline \(message, privacy: .public)")
     }
 
     /// Emits a link preview outcome event. Records identifiers and outcome
@@ -256,5 +287,26 @@ extension ClipboardDiagnostics {
         let kind: String
         let contentLength: Int
         let contentKeyDigest: String
+    }
+
+    /// Bounded image-pipeline metadata. The field set is deliberately closed:
+    /// nothing here identifies or carries captured content.
+    struct ImagePipelineEvent: Codable, Equatable {
+        enum Event: String, Codable {
+            case imageEncodingOverflow = "image_encoding_overflow"
+        }
+
+        let event: Event
+        let uptime: TimeInterval
+        let sequence: Int
+        let changeCount: Int
+        let queueDepth: Int
+        let sourceApp: String
+
+        func jsonLine() throws -> String {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            return String(decoding: try encoder.encode(self), as: UTF8.self)
+        }
     }
 }

@@ -73,19 +73,40 @@ final class ClipboardStore: ObservableObject {
     private var historyLimitCancellable: AnyCancellable?
     private var timer: Timer?
     private var pollTask: Task<Void, Never>?
-    private var imageEncodingTask: Task<Void, Never>?
     private var lastChangeCount: Int
     private var pendingObservation: PendingObservation?
     private var isMonitoring = false
     private var burstTask: Task<Void, Never>?
     private var burstDeadline: TimeInterval?
     private var burstGeneration = 0
+    /// Admitted image captures that have not started encoding. They hold raw
+    /// `CGImage` bytes but launch no work of their own.
+    var waitingImageCaptures: [PendingImageCapture] = []
+    /// The single request holding the sole physical encoding slot, if any. A
+    /// request invalidated by Clear History or a stop keeps the slot until its
+    /// encoder actually returns.
+    var activeImageCapture: PendingImageCapture?
+    /// Revokes insertion eligibility only. Clear History and monitoring stop
+    /// advance it and drop waiting captures; a started encoder is untouched.
+    var imageCaptureGeneration = 0
+    /// Next admission sequence. One-based, so a deletion before any admission
+    /// records a cutoff no real completion can reach.
+    var nextImageAdmissionSequence = 1
+    /// Buffered captures allowed, including active work. Production is four.
+    let imageCaptureCapacity: Int
+    let encodeImage: ImageCaptureEncoder
+    /// Deterministic test seam: invoked on the main actor after every admitted
+    /// image completion has been applied or rejected, letting tests await
+    /// handled transitions without sleeps — including rejected ones.
+    var imageCompletionHandledObserver: (() -> Void)?
+    /// Highest image admission sequence each deleted content key has rejected.
+    /// A completion at or before its cutoff is stale; a later intentional copy
+    /// of the same content is not. Holds identities only, never clipboard bytes.
+    var deletedContentCutoffs: [String: Int] = [:]
     let uptimeProvider: () -> TimeInterval
     private let minimumStabilityInterval: TimeInterval
     private let burstPollInterval: TimeInterval
     private let burstWindow: TimeInterval
-    private var deletedContentKeys: [String] = []
-    private let maxDeletedContentKeys = 256
 
     /// Blob identities one successful commit authorized for an item. Roles are
     /// independent: a receipt carrying only one role never clears the other.
@@ -168,7 +189,9 @@ final class ClipboardStore: ObservableObject {
         fetchLinkSnapshot: @escaping LinkSnapshotLoader = { try await LinkPreviewFetcher.fetchWebSnapshot(url: $0) },
         minimumStabilityInterval: TimeInterval = 0.15,
         burstPollInterval: TimeInterval = 0.06,
-        burstWindow: TimeInterval = 0.6
+        burstWindow: TimeInterval = 0.6,
+        imageCaptureCapacity: Int = 4,
+        encodeImage: @escaping ImageCaptureEncoder = ClipboardStore.defaultImageEncoder
     ) {
         self.settings = settings
         self.sourceTracker = sourceTracker
@@ -182,6 +205,12 @@ final class ClipboardStore: ObservableObject {
         self.minimumStabilityInterval = minimumStabilityInterval
         self.burstPollInterval = burstPollInterval
         self.burstWindow = burstWindow
+        self.imageCaptureCapacity = imageCaptureCapacity
+        // Eviction needs a waiting capture to replace. Below two, admission
+        // would append past the bound instead of dropping one, so the seam
+        // refuses to model a buffer it cannot enforce.
+        precondition(imageCaptureCapacity >= 2, "the image capture buffer needs room for an active slot and one waiting capture")
+        self.encodeImage = encodeImage
         lastChangeCount = pasteboard.changeCount
         let loadedItems = initialItems ?? ClipboardHistoryPersistence.loadItems()
         let startupEnforcement = ClipboardHistoryPolicy.enforcingLimits(
@@ -355,7 +384,6 @@ extension ClipboardStore {
             let removedItems = items.filter { $0.id == item.id }
             guard !removedItems.isEmpty else { return }
             rememberDeleted(removedItems)
-            cancelPendingImageEncoding()
             clearSystemPasteboardIfMatching(removedItems)
             items.removeAll { $0.id == item.id }
             let removedIDs = removedItems.map(\.id)
@@ -368,13 +396,15 @@ extension ClipboardStore {
 
     @discardableResult
     func clearHistory(includePinnedAndPinboardItems: Bool) -> Int {
-        withHistoryStateMutation {
+        // Invalidation precedes the removable-items guard: clearing an empty or
+        // fully protected history must still revoke already admitted images.
+        invalidateImageCaptures()
+        return withHistoryStateMutation {
             let removedItems = items.filter { item in
                 includePinnedAndPinboardItems || (!item.isPinned && item.pinboardName == nil)
             }
             guard !removedItems.isEmpty else { return 0 }
             rememberDeleted(removedItems)
-            cancelPendingImageEncoding()
             clearSystemPasteboardIfMatching(removedItems)
 
             if includePinnedAndPinboardItems {
@@ -389,18 +419,6 @@ extension ClipboardStore {
             saveItems()
             return removedItems.count
         }
-    }
-
-    func hasDeletedContentKey(_ key: String) -> Bool {
-        deletedContentKeys.contains(key)
-    }
-
-    func shouldInsertEncodedItem(_ item: ClipboardItem) -> Bool {
-        !hasDeletedContentKey(item.contentKey)
-    }
-
-    var hasPendingImageEncodingTask: Bool {
-        imageEncodingTask != nil
     }
 
     /// Existing persistence entry point for a validated preview. All snapshot
@@ -491,8 +509,7 @@ extension ClipboardStore {
         pollTask?.cancel()
         pollTask = nil
         cancelBurstScheduling()
-        imageEncodingTask?.cancel()
-        imageEncodingTask = nil
+        invalidateImageCaptures()
     }
 
     private var ignoredApplications: [String] {
@@ -609,11 +626,27 @@ extension ClipboardStore {
 
         if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
            let image = images.first {
-            enqueueImageItem(
-                image: image,
+            // Materialize before resolving: an entry that cannot produce a
+            // CGImage must not consume shortcut-source evidence or emit a
+            // capture diagnostic for a card that will never exist.
+            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                return nil
+            }
+            let source = sourceMetadata(
+                kind: .image,
+                isSystemGeneratedContent: pasteboardContainsSystemScreenshot(),
                 changeCountDelta: changeCountDelta,
                 currentChangeCount: currentChangeCount,
                 firstObservedSource: firstObservedSource
+            )
+            // An ignored source is rejected before the image is buffered, so it
+            // can never occupy a capture slot or launch encoding work.
+            guard !ignoredApplications.contains(source.appName) else { return nil }
+            admitImageCapture(
+                cgImage: cgImage,
+                displaySize: image.size,
+                source: source,
+                currentChangeCount: currentChangeCount
             )
             return nil
         }
@@ -709,72 +742,6 @@ extension ClipboardStore {
         )
     }
 
-    private func enqueueImageItem(
-        image: NSImage,
-        changeCountDelta: Int,
-        currentChangeCount: Int,
-        firstObservedSource: ClipboardSource?
-    ) {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-        let size = image.size
-        let source = sourceMetadata(
-            kind: .image,
-            isSystemGeneratedContent: pasteboardContainsSystemScreenshot(),
-            changeCountDelta: changeCountDelta,
-            currentChangeCount: currentChangeCount,
-            firstObservedSource: firstObservedSource
-        )
-
-        imageEncodingTask?.cancel()
-        // The bounded PNG and its content address are produced together in the
-        // background; a detached task does not inherit task-local state, so the
-        // observation recorder is carried across explicitly.
-        let recorder = MediaHashObservation.recorder
-        let encodingTask = Task.detached(priority: .utility) {
-            await MediaHashObservation.propagating(recorder) {
-                Self.pngData(cgImage: cgImage, maxPixel: 1_200).map { PreparedMedia(hashing: $0) }
-            }
-        }
-        imageEncodingTask = Task { @MainActor [weak self] in
-            let prepared = await encodingTask.value
-            guard !Task.isCancelled, let prepared else { return }
-            let item = ClipboardItem(
-                id: UUID(),
-                kind: .image,
-                title: "Image",
-                preview: "\(Int(size.width)) x \(Int(size.height))",
-                sourceApp: source.appName,
-                sourceAppIconData: source.iconData,
-                sourceAppIconBlobID: source.iconBlobID,
-                createdAt: Date(),
-                isPinned: false,
-                pinboardName: nil,
-                textValue: nil,
-                fileURLs: [],
-                imageData: prepared.data,
-                imageBlobID: prepared.id
-            )
-            guard let self, self.shouldInsertEncodedItem(item) else { return }
-            self.add(item)
-        }
-    }
-
-    private func rememberDeleted(_ removedItems: [ClipboardItem]) {
-        for key in removedItems.map(\.contentKey) {
-            deletedContentKeys.removeAll { $0 == key }
-            deletedContentKeys.append(key)
-        }
-
-        if deletedContentKeys.count > maxDeletedContentKeys {
-            deletedContentKeys.removeFirst(deletedContentKeys.count - maxDeletedContentKeys)
-        }
-    }
-
-    private func cancelPendingImageEncoding() {
-        imageEncodingTask?.cancel()
-        imageEncodingTask = nil
-    }
-
     private func clearSystemPasteboardIfMatching(_ removedItems: [ClipboardItem]) {
         guard removedItems.contains(where: pasteboardMatches) else { return }
         pasteboard.clearContents()
@@ -865,7 +832,7 @@ extension ClipboardStore {
         return "image:\(PreparedMedia(hashing: data).id)"
     }
 
-    private nonisolated static func pngData(cgImage: CGImage, maxPixel: CGFloat) -> Data? {
+    nonisolated static func pngData(cgImage: CGImage, maxPixel: CGFloat) -> Data? {
         let largestSide = max(cgImage.width, cgImage.height)
         guard largestSide > 0 else { return nil }
         let scale = min(1, maxPixel / CGFloat(largestSide))

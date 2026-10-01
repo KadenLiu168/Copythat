@@ -110,6 +110,88 @@ struct ClipboardMediaHashObservationTests {
         #expect(counters.identityHashCount == 0)
     }
 
+    // MARK: - Consecutive real production-encoder captures
+
+    /// Every capture finalizes with the real bounded PNG pipeline: exactly one
+    /// identity hash each, always off MainActor, even while earlier captures are
+    /// still queued behind the single encoder.
+    @MainActor
+    @Test func queuedRealEncoderCapturesHashOnceEachOutsideMainActor() async throws {
+        let counters = MediaOperationCounters()
+        let icon = Data(repeating: 0x5a, count: 72)
+        let harness = ImagePipelineHarness(
+            capacity: 4,
+            source: ClipboardSource(appName: "Screenshot", iconData: icon, capturedAt: Date())
+        )
+        let images = [
+            ImagePipelineFixture.redImage(),
+            ImagePipelineFixture.greenImage(),
+            ImagePipelineFixture.blueImage()
+        ]
+
+        counters.reset()
+        await counters.measure {
+            for image in images {
+                harness.capture(image)
+            }
+            await harness.encoder.waitForStart(reaching: 1)
+            #expect(harness.encoder.peakConcurrency == 1)
+            await harness.drain(through: 3)
+        }
+
+        #expect(counters.identityHashCount == 3, "one identity hash per finalized image, and no more")
+        #expect(counters.mainThreadIdentityHashCount == 0, "PNG and hashing stay off MainActor")
+        #expect(counters.integrityHashCount == 0)
+        #expect(harness.store.items.count == 3)
+        for item in harness.store.items {
+            #expect(item.imageBlobID == item.imageData.map(sha256Hex))
+            #expect(item.sourceAppIconBlobID == sha256Hex(icon), "a prepared icon adds no identity hash")
+        }
+
+        // A metadata mutation reuses the established identities.
+        counters.reset()
+        let pinned = try #require(harness.store.items.first)
+        await counters.measure { harness.store.togglePin(pinned) }
+
+        #expect(counters.mediaHashCount == 0, "metadata saves neither rehash nor re-encode image payloads")
+        #expect(harness.store.items.first?.isPinned == true)
+    }
+
+    /// Recorder attribution belongs to the admission that captured it: a
+    /// capture admitted after a measurement window closes is not counted inside
+    /// it, so a later request cannot inherit an earlier one's context.
+    @MainActor
+    @Test func eachCaptureUsesTheRecorderInstalledAtItsOwnAdmission() async throws {
+        let firstCounters = MediaOperationCounters()
+        let secondCounters = MediaOperationCounters()
+        let harness = ImagePipelineHarness(capacity: 3)
+
+        await firstCounters.measure {
+            harness.capture(ImagePipelineFixture.redImage())
+            await harness.encoder.waitForStart(reaching: 1)
+        }
+        await secondCounters.measure {
+            harness.capture(ImagePipelineFixture.greenImage())
+        }
+        #expect(firstCounters.identityHashCount == 0)
+        #expect(secondCounters.identityHashCount == 0)
+
+        // Finalize after both measurement scopes have ended. Each queued
+        // request must retain its own admission recorder, not the launch one.
+        await harness.drain(through: 2)
+        #expect(firstCounters.identityHashCount == 1)
+        #expect(secondCounters.identityHashCount == 1)
+        #expect(firstCounters.mainThreadIdentityHashCount == 0)
+        #expect(secondCounters.mainThreadIdentityHashCount == 0)
+
+        harness.capture(ImagePipelineFixture.blueImage())
+        await harness.encoder.waitForStart(reaching: 3)
+        await harness.drain(through: 3)
+        #expect(firstCounters.identityHashCount == 1, "a later worker must not reuse an earlier recorder")
+        #expect(secondCounters.identityHashCount == 1)
+        #expect(harness.store.items.count == 3)
+    }
+
     private func temporaryDefaults() -> UserDefaults {
         let suiteName = "MediaHashObservation.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
