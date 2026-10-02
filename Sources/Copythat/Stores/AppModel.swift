@@ -52,7 +52,9 @@ final class AppModel: ObservableObject {
         pasteboard: NSPasteboard = .general,
         settings: AppSettings? = nil,
         initialItems: [ClipboardItem]? = nil,
-        mediaLoader: ClipboardHistoryMediaLoader = .shared
+        mediaLoader: ClipboardHistoryMediaLoader = .shared,
+        historyLoader: (any ClipboardHistoryLoading)? = nil,
+        encodeImage: @escaping ClipboardStore.ImageCaptureEncoder = ClipboardStore.defaultImageEncoder
     ) {
         let settings = settings ?? AppSettings()
         let sourceTracker = CopySourceTracker()
@@ -62,10 +64,13 @@ final class AppModel: ObservableObject {
         let store = ClipboardStore(
             settings: settings,
             sourceTracker: sourceTracker,
-            initialItems: initialItems,
+            // Explicit startup items are purely in-memory and immediately
+            // usable. Nil means production: an empty Store that restores.
+            initialItems: initialItems ?? [],
             pasteboard: pasteboard,
             mediaLoader: mediaLoader,
-            persistItems: { historySaveCoordinator.requestSave($0) }
+            persistItems: { historySaveCoordinator.requestSave($0) },
+            encodeImage: encodeImage
         )
         self.store = store
         // The store's loader is the same blob store this persistence writes to,
@@ -81,6 +86,13 @@ final class AppModel: ObservableObject {
                 store?.handleCopyIntentWake()
             }
         }
+        // Restoration starts only after both handlers exist, so a capture that
+        // finalizes during the load already has its durable-media and
+        // copy-intent owners. The loader is created here rather than in a
+        // default argument so nothing loads eagerly, and only for the
+        // production path: explicit items never invoke it.
+        guard initialItems == nil else { return }
+        store.beginHistoryRestore(with: historyLoader ?? ClipboardHistoryRestoreWorker())
     }
 
     private static var capturePasteboard: NSPasteboard {

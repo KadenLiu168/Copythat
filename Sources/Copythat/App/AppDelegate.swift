@@ -162,9 +162,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard model.historySaveCoordinator.hasUnsavedChanges else { return .terminateNow }
+        // Checked before the fast path: a repeated Quit while a resolution is
+        // in flight must keep waiting, never reply early or start a second one.
         guard !isResolvingTermination else { return .terminateLater }
-
+        // Pending image work that has not become an item is invisible to the
+        // save coordinator, and a loading history cannot be inspected at all.
+        let hasPendingCaptureWork = model.store.isRestoringHistory || model.store.hasPendingImageCapture
+        guard model.historySaveCoordinator.hasUnsavedChanges || hasPendingCaptureWork else {
+            return .terminateNow
+        }
+        // Close new admission first, so the accepted-work set stops growing and
+        // the drain below is finite. This never invalidates accepted images.
+        model.store.pauseCaptureAdmission()
         isResolvingTermination = true
         terminationTask = Task { @MainActor [weak self] in
             await self?.resolvePendingHistoryBeforeTermination()
@@ -173,6 +182,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resolvePendingHistoryBeforeTermination() async {
+        // Either order is safe: an image finalized during restoration enters
+        // the startup replay buffer, and one finalized afterwards uses the
+        // ordinary insertion path.
+        await model.store.finishHistoryRestore()
+        await model.store.drainAdmittedImageCaptures()
         var didSave = await model.historySaveCoordinator.flush()
         while !didSave {
             switch chooseQuitSaveFailure() {
@@ -192,6 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func finishTerminationReply(shouldTerminate: Bool) {
         isResolvingTermination = false
         terminationTask = nil
+        if !shouldTerminate {
+            // Cancel Quit keeps current in-memory history and resumes only the
+            // monitoring that was active before the pause.
+            model.store.resumeCaptureAdmission()
+        }
         replyToTermination(shouldTerminate)
     }
 

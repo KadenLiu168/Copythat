@@ -1,7 +1,10 @@
 import AppKit
 import Foundation
 
-enum ClipboardKind: String, Codable, CaseIterable {
+// Every stored field is a value type, so restored history can cross the
+// restore actor boundary structurally. The computed AppKit accessors below
+// build values on demand and store nothing.
+enum ClipboardKind: String, Codable, CaseIterable, Sendable {
     case text
     case url
     case image
@@ -26,7 +29,7 @@ enum ClipboardKind: String, Codable, CaseIterable {
     }
 }
 
-struct ClipboardItem: Identifiable, Codable, Equatable {
+struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let kind: ClipboardKind
     /// Display fields the model's own transforms replace. They stay `private(set)`

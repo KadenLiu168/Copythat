@@ -16,6 +16,7 @@ struct ClipboardCardView: View, Equatable {
     let hidesPreview: Bool
     let panelVisible: Bool
     let authorizationGeneration: Int
+    let canMutateHistory: Bool
     let mediaLoader: ClipboardHistoryMediaLoader
     /// Read (never mutated) at completion time so a late result checks the
     /// current authorization instead of the value captured when its task ran.
@@ -39,6 +40,7 @@ struct ClipboardCardView: View, Equatable {
         hidesPreview: Bool,
         panelVisible: Bool,
         authorizationGeneration: Int,
+        canMutateHistory: Bool = true,
         mediaLoader: ClipboardHistoryMediaLoader,
         store: ClipboardStore,
         mediaState: ClipboardCardMediaState? = nil,
@@ -54,6 +56,7 @@ struct ClipboardCardView: View, Equatable {
         self.hidesPreview = hidesPreview
         self.panelVisible = panelVisible
         self.authorizationGeneration = authorizationGeneration
+        self.canMutateHistory = canMutateHistory
         self.mediaLoader = mediaLoader
         self.store = store
         self.onSelect = onSelect
@@ -74,7 +77,8 @@ struct ClipboardCardView: View, Equatable {
             lhs.isSelected == rhs.isSelected &&
             lhs.hidesPreview == rhs.hidesPreview &&
             lhs.panelVisible == rhs.panelVisible &&
-            lhs.authorizationGeneration == rhs.authorizationGeneration
+            lhs.authorizationGeneration == rhs.authorizationGeneration &&
+            lhs.canMutateHistory == rhs.canMutateHistory
     }
 
     var body: some View {
@@ -109,6 +113,7 @@ struct ClipboardCardView: View, Equatable {
         )
         .contextMenu {
             Button(item.isPinned ? "Unpin" : "Pin", action: onTogglePin)
+                .disabled(!canMutateHistory)
             if !pinboards.isEmpty {
                 Menu("Pinboard") {
                     ForEach(pinboards) { pinboard in
@@ -119,10 +124,12 @@ struct ClipboardCardView: View, Equatable {
                         Button("Remove from Pinboard") { onMoveToPinboard(nil) }
                     }
                 }
+                .disabled(!canMutateHistory)
             }
             Button("Paste", action: onPaste)
             Divider()
             Button("Delete", role: .destructive, action: onDelete)
+                .disabled(!canMutateHistory)
         }
         .onDrag { dragProvider(for: item) }
         .task(id: mediaTaskIdentity) {
@@ -133,6 +140,9 @@ struct ClipboardCardView: View, Equatable {
         }
     }
 
+}
+
+extension ClipboardCardView {
     private var headerSection: some View {
         ZStack(alignment: .topTrailing) {
             sourceAccent

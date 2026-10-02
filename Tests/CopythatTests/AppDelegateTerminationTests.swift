@@ -7,7 +7,9 @@ private enum TerminationWorkerFailure: Error {
     case injectedSaveFailure
 }
 
-private actor TerminationSaveWorker: ClipboardHistorySaving {
+/// Shared save-worker double: records attempts, committed generations and
+/// the committed text, and can block or fail individual generations.
+actor TerminationSaveWorker: ClipboardHistorySaving {
     private(set) var attempts: [UInt64] = []
     private(set) var committedGenerations: [UInt64] = []
     private var committedText: String?

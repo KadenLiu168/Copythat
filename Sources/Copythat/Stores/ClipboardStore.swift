@@ -44,6 +44,16 @@ final class LinkPreviewTaskRegistry: @unchecked Sendable {
     }
 }
 
+/// Startup restoration lifecycle. One-shot and startup-specific: a Store built
+/// with explicit items stays `ready` forever. Not a mutation journal.
+enum HistoryRestoreState: Sendable, Equatable {
+    case ready
+    /// The loader is in flight; arrivals are buffered rather than inserted.
+    case restoring
+    /// Baseline installation and replay, in one synchronous MainActor turn.
+    case applying
+}
+
 @MainActor
 final class ClipboardStore: ObservableObject {
     @Published private(set) var items: [ClipboardItem] = []
@@ -62,20 +72,49 @@ final class ClipboardStore: ObservableObject {
     }
     @Published var permissionMessage: String?
 
-    private let pasteboard: NSPasteboard
-    private let settings: AppSettings
-    private let sourceTracker: CopySourceTracker
+    /// Read-only loading publication: true from the synchronous
+    /// `beginHistoryRestore(with:)` call until the baseline and every replayed
+    /// capture are applied. State is internal so
+    /// `ClipboardStore+HistoryRestore.swift` owns the lifecycle.
+    @Published private(set) var isRestoringHistory = false
+    var historyRestoreState: HistoryRestoreState = .ready
+    /// Survives clearing the task handle, so a repeated begin cannot start a
+    /// second restoration or invoke the loader twice.
+    var didBeginHistoryRestore = false
+    /// Handle for the in-flight restoration, so Quit can await real completion.
+    var historyRestoreTask: Task<Void, Never>?
+    /// Complete items deferred until the baseline existed, in `add` order.
+    var startupCaptureBuffer: [ClipboardItem] = []
+    /// Set by any pre-restoration save request and by an actual baseline trim.
+    var isBootstrapDirty = false
+    /// Normal-Quit admission pause. Unlike `stopMonitoring` it closes new
+    /// admission without invalidating already accepted images, so the accepted
+    /// set stays finite enough to drain. Paired with the monitoring flag below.
+    @Published private(set) var isCaptureAdmissionPaused = false
+    /// Whether scheduled monitoring was active when the pause began, so Cancel
+    /// Quit restores exactly the prior activity and no more.
+    var wasMonitoringBeforeAdmissionPause = false
+    /// Continuations awaiting the image pipeline going idle. Control state only.
+    var imageDrainWaiters: [CheckedContinuation<Void, Never>] = []
+
+    let pasteboard: NSPasteboard
+    // Internal so `ClipboardStore+HistoryRestore.swift` enforces limits with the
+    // same current settings every other extension already reads.
+    let settings: AppSettings
+    // Shared with `ClipboardStore+SourceAttribution.swift`, like `pasteboard`,
+    // `settings` and `mediaLoader` already are.
+    let sourceTracker: CopySourceTracker
     let diagnostics: ClipboardDiagnostics
     /// Shared on-demand media access for card display, paste materialization
     /// and image drag, all reading the same persisted blob store.
     let mediaLoader: ClipboardHistoryMediaLoader
     private let persistItems: ([ClipboardItem]) -> Void
     private var historyLimitCancellable: AnyCancellable?
-    private var timer: Timer?
-    private var pollTask: Task<Void, Never>?
+    var timer: Timer?
+    var pollTask: Task<Void, Never>?
     private var lastChangeCount: Int
     private var pendingObservation: PendingObservation?
-    private var isMonitoring = false
+    var isMonitoring = false
     private var burstTask: Task<Void, Never>?
     private var burstDeadline: TimeInterval?
     private var burstGeneration = 0
@@ -118,8 +157,7 @@ final class ClipboardStore: ObservableObject {
     /// Committed heavy media awaiting release. Entries hold references only —
     /// an item's UUID plus the blob identities its commit covered — and never
     /// Data, prepared payloads, snapshots, or closures capturing them. Release
-    /// handling lives in `ClipboardStore+DurableMediaRelease.swift`, so this
-    /// stays internal for the same-module extension.
+    /// handling lives in `ClipboardStore+DurableMediaRelease.swift`.
     var pendingDurableMediaRelease: [UUID: DurableMediaReferences] = [:]
 
     // Link preview orchestration state. Extensitivity lives in
@@ -150,6 +188,10 @@ final class ClipboardStore: ObservableObject {
     let snapshotCacheLimit = 64
     let snapshotRetryTTL: TimeInterval = 300
     var isMutatingHistoryState = false
+    /// Deterministic test seam: invoked on the main actor after a
+    /// settings-driven limit enforcement has been evaluated, so a test can await
+    /// the deferred turn and assert what it did *not* save.
+    var historyBoundsEnforcedObserver: (() -> Void)?
     /// Deterministic test seam: invoked on the main actor after processing each
     /// link preview completion, letting tests await checkpoints without sleeps.
     var linkPreviewHandledObserver: (() -> Void)?
@@ -176,10 +218,21 @@ final class ClipboardStore: ObservableObject {
         }
     }
 
+    /// Publishes the restoration lifecycle's loading state, which the
+    /// restoration extension cannot write behind the private setter.
+    func publishHistoryRestoring(_ isRestoring: Bool) {
+        isRestoringHistory = isRestoring
+    }
+
+    /// Installs the enforced persisted baseline, which the restoration
+    /// extension cannot write behind the private `items` setter.
+    func installRestoredBaseline(_ baseline: [ClipboardItem]) {
+        items = baseline
+    }
     init(
         settings: AppSettings,
         sourceTracker: CopySourceTracker,
-        initialItems: [ClipboardItem]? = nil,
+        initialItems: [ClipboardItem] = [],
         pasteboard: NSPasteboard = .general,
         diagnostics: ClipboardDiagnostics = ClipboardDiagnostics(),
         mediaLoader: ClipboardHistoryMediaLoader = .shared,
@@ -212,9 +265,11 @@ final class ClipboardStore: ObservableObject {
         precondition(imageCaptureCapacity >= 2, "the image capture buffer needs room for an active slot and one waiting capture")
         self.encodeImage = encodeImage
         lastChangeCount = pasteboard.changeCount
-        let loadedItems = initialItems ?? ClipboardHistoryPersistence.loadItems()
+        // Construction is purely in memory: nothing here reads the manifest.
+        // Startup bounds still apply to items the caller supplied, so an
+        // explicit startup behaves exactly as it always did.
         let startupEnforcement = ClipboardHistoryPolicy.enforcingLimits(
-            on: loadedItems,
+            on: initialItems,
             limit: settings.historyLimit
         )
         items = startupEnforcement.items
@@ -250,6 +305,7 @@ final class ClipboardStore: ObservableObject {
     /// Copy-intent wake signal from `CopySourceTracker` (D2/D3): starts or extends
     /// the bounded burst loop; rejected while monitoring is stopped.
     func handleCopyIntentWake() {
+        guard !isCaptureAdmissionPaused else { return }
         extendBurst()
     }
 
@@ -320,6 +376,7 @@ extension ClipboardStore {
     }
 
     func togglePin(_ item: ClipboardItem) {
+        guard canMutateHistory else { return }
         withHistoryStateMutation {
             guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
             items[index].isPinned.toggle()
@@ -329,6 +386,7 @@ extension ClipboardStore {
     }
 
     func move(_ item: ClipboardItem, toPinboard name: String?) {
+        guard canMutateHistory else { return }
         withHistoryStateMutation {
             guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
             items[index].pinboardName = name
@@ -342,6 +400,7 @@ extension ClipboardStore {
     }
 
     func clearPinboardAssignments(named name: String) {
+        guard canMutateHistory else { return }
         withHistoryStateMutation {
             var didChange = false
             for index in items.indices where items[index].pinboardName == name {
@@ -356,6 +415,7 @@ extension ClipboardStore {
     }
 
     func renamePinboardAssignments(from oldName: String, to newName: String) {
+        guard canMutateHistory else { return }
         withHistoryStateMutation {
             var didChange = false
             for index in items.indices where items[index].pinboardName == oldName {
@@ -380,6 +440,7 @@ extension ClipboardStore {
     }
 
     func remove(_ item: ClipboardItem) {
+        guard canMutateHistory else { return }
         withHistoryStateMutation {
             let removedItems = items.filter { $0.id == item.id }
             guard !removedItems.isEmpty else { return }
@@ -396,6 +457,9 @@ extension ClipboardStore {
 
     @discardableResult
     func clearHistory(includePinnedAndPinboardItems: Bool) -> Int {
+        // The rejection precedes the invalidation below: a refused clear must
+        // not revoke already admitted images, not even on an empty history.
+        guard canMutateHistory else { return 0 }
         // Invalidation precedes the removable-items guard: clearing an empty or
         // fully protected history must still revoke already admitted images.
         invalidateImageCaptures()
@@ -442,6 +506,9 @@ extension ClipboardStore {
 
 extension ClipboardStore {
     func pollPasteboard() {
+        // An explicit poll outside scheduled monitoring is still an admission
+        // path, so the Quit pause closes it too.
+        guard !isCaptureAdmissionPaused else { return }
         let now = uptimeProvider()
         let currentChangeCount = pasteboard.changeCount
         guard currentChangeCount != lastChangeCount else {
@@ -512,6 +579,37 @@ extension ClipboardStore {
         invalidateImageCaptures()
     }
 
+    /// Closes new capture admission at the first normal-Quit request.
+    ///
+    /// Unlike `stopMonitoring` it does not revoke image eligibility: admitted
+    /// captures keep their generation, waiting FIFO and physical slot, which is
+    /// what makes the accepted-work set finite enough to drain. Only scheduled
+    /// observation stops, so a continuing copier cannot extend the drain.
+    func pauseCaptureAdmission() {
+        guard !isCaptureAdmissionPaused else { return }
+        wasMonitoringBeforeAdmissionPause = isMonitoring
+        isCaptureAdmissionPaused = true
+        isMonitoring = false
+        timer?.invalidate()
+        timer = nil
+        pollTask?.cancel()
+        pollTask = nil
+        // Drops the pending observation and burst loop, never an image capture.
+        cancelBurstScheduling()
+    }
+
+    /// Ends the pause after Cancel Quit, restoring only the scheduled activity
+    /// that was active when it began. In-memory history and image eligibility
+    /// are untouched throughout.
+    func resumeCaptureAdmission() {
+        guard isCaptureAdmissionPaused else { return }
+        isCaptureAdmissionPaused = false
+        let shouldResumeMonitoring = wasMonitoringBeforeAdmissionPause
+        wasMonitoringBeforeAdmissionPause = false
+        if shouldResumeMonitoring {
+            startMonitoring()
+        }
+    }
     private var ignoredApplications: [String] {
         settings.ignoredApplications
             .split(separator: "\n")
@@ -520,25 +618,40 @@ extension ClipboardStore {
     }
 
     func add(_ item: ClipboardItem) {
-        withHistoryStateMutation {
-            let beforeCount = items.count
-            let insertion = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
-            items = insertion.items
-            diagnostics.logInsertion(
-                item: item,
-                beforeCount: beforeCount,
-                afterCount: items.count,
-                duplicateSummary: insertion.duplicateSummary
-            )
-            cleanupLinkPreviewWork(forRemovedItemIDs: insertion.removedItemIDs)
-            discardPendingDurableMediaRelease(forRemovedItemIDs: insertion.removedItemIDs)
-            refreshFilteredItems()
-            if let selectedItemID = insertion.selectedItemID {
-                selectedID = selectedItemID
-            }
-            saveItems()
-            registerLinkMetadataIfNeeded(for: insertion.insertedItem)
+        guard historyRestoreState == .ready else {
+            // Restoration owns insertion until the baseline exists: arrivals
+            // are retained complete and in order — no insertion, no link
+            // registration, no policy — then replayed through the same body.
+            startupCaptureBuffer.append(item)
+            isBootstrapDirty = true
+            return
         }
+        withHistoryStateMutation {
+            applyAdd(item)
+        }
+    }
+
+    /// The single insertion body shared by ordinary capture and startup replay,
+    /// so policy, diagnostics, cleanup, filtering, selection and metadata
+    /// registration cannot drift between them.
+    func applyAdd(_ item: ClipboardItem) {
+        let beforeCount = items.count
+        let insertion = ClipboardHistoryPolicy.adding(item, to: items, limit: settings.historyLimit)
+        items = insertion.items
+        diagnostics.logInsertion(
+            item: item,
+            beforeCount: beforeCount,
+            afterCount: items.count,
+            duplicateSummary: insertion.duplicateSummary
+        )
+        cleanupLinkPreviewWork(forRemovedItemIDs: insertion.removedItemIDs)
+        discardPendingDurableMediaRelease(forRemovedItemIDs: insertion.removedItemIDs)
+        refreshFilteredItems()
+        if let selectedItemID = insertion.selectedItemID {
+            selectedID = selectedItemID
+        }
+        saveItems()
+        registerLinkMetadataIfNeeded(for: insertion.insertedItem)
     }
 
     /// Applies the configured bounds to existing history after a settings-driven
@@ -549,6 +662,7 @@ extension ClipboardStore {
     /// deletion and keeps image-encoding work alive.
     func enforceHistoryBounds() {
         let enforcement = ClipboardHistoryPolicy.enforcingLimits(on: items, limit: settings.historyLimit)
+        historyBoundsEnforcedObserver?()
         guard !enforcement.removedItemIDs.isEmpty else { return }
         withHistoryStateMutation {
             items = enforcement.items
@@ -557,49 +671,6 @@ extension ClipboardStore {
             refreshFilteredItems()
             saveItems()
         }
-    }
-
-    /// Returns an item ready for the existing pasteboard write path. Items
-    /// without persisted heavy media — text, URL, file, and items whose bytes
-    /// are already resident — return unchanged, so their path stays
-    /// synchronous. A persisted image is materialized into a temporary copy
-    /// that carries verified bytes and never mutates history.
-    func materializedItemForPaste(_ item: ClipboardItem) async throws -> ClipboardItem {
-        guard item.kind == .image,
-              item.imageData == nil,
-              let blobID = item.imageBlobID else {
-            return item
-        }
-        let data = try await mediaLoader.load(blobID: blobID)
-        guard NSImage(data: data) != nil else {
-            throw ClipboardPasteMaterializationError.undecodableImage
-        }
-        // The verified bytes and the address they were loaded by are handed to
-        // the model together, so the temporary copy keeps the item's identity
-        // and the Store never writes media fields itself.
-        return item.materializedForPaste(PreparedMedia(data: data, id: blobID))
-    }
-
-    func writeToPasteboard(_ item: ClipboardItem) -> Bool {
-        let didWrite: Bool
-        switch item.kind {
-        case .text, .url:
-            let string = item.textValue ?? item.preview
-            guard !string.isEmpty else { return false }
-            pasteboard.clearContents()
-            didWrite = pasteboard.setString(string, forType: .string)
-        case .file:
-            let existingFileURLs = item.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
-            guard !existingFileURLs.isEmpty else { return false }
-            pasteboard.clearContents()
-            didWrite = pasteboard.writeObjects(existingFileURLs as [NSURL])
-        case .image:
-            guard let image = item.image else { return false }
-            pasteboard.clearContents()
-            didWrite = pasteboard.writeObjects([image])
-        }
-        markPasteboardProcessed()
-        return didWrite
     }
 
     private func readCurrentPasteboard(
@@ -748,7 +819,7 @@ extension ClipboardStore {
         markPasteboardProcessed()
     }
 
-    private func markPasteboardProcessed() {
+    func markPasteboardProcessed() {
         lastChangeCount = pasteboard.changeCount
         pendingObservation = nil
         cancelBurstScheduling()
@@ -773,97 +844,6 @@ extension ClipboardStore {
         } ?? false
     }
 
-    private func pasteboardMatches(_ item: ClipboardItem) -> Bool {
-        switch item.kind {
-        case .text, .url:
-            return pasteboard.string(forType: .string) == (item.textValue ?? item.preview)
-        case .file:
-            guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] else {
-                return false
-            }
-            let currentPaths = urls.filter(\.isFileURL).map(\.path)
-            return currentPaths == item.fileURLs.map(\.path)
-        case .image:
-            guard let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-                  let image = images.first,
-                  let currentContentKey = imageContentKey(for: image) else {
-                return false
-            }
-            return currentContentKey == item.contentKey
-        }
-    }
-}
-
-// MARK: - Source attribution helpers
-
-extension ClipboardStore {
-    func normalizedImageData(for image: NSImage) -> Data? {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let data = Self.pngData(cgImage: cgImage, maxPixel: 1_200) else { return nil }
-        return data
-    }
-
-    private func sourceMetadata(
-        kind: ClipboardKind,
-        isSystemGeneratedContent: Bool = false,
-        changeCountDelta: Int,
-        currentChangeCount: Int,
-        firstObservedSource: ClipboardSource?
-    ) -> ClipboardSource {
-        let source = sourceTracker.resolveSource(
-            isSystemGeneratedContent: isSystemGeneratedContent,
-            firstObservedSource: firstObservedSource,
-            pasteboardChangeCountDelta: changeCountDelta,
-            currentPasteboardChangeCount: currentChangeCount
-        )
-        diagnostics.logCapture(
-            kind: kind,
-            source: source,
-            currentChangeCount: currentChangeCount,
-            changeCountDelta: changeCountDelta
-        )
-        return source
-    }
-
-    /// Identity of the current pasteboard image, in the same form as an item's
-    /// `contentKey`, so a restored unloaded image matches without being read.
-    private func imageContentKey(for image: NSImage) -> String? {
-        guard let data = normalizedImageData(for: image) else { return nil }
-        return "image:\(PreparedMedia(hashing: data).id)"
-    }
-
-    nonisolated static func pngData(cgImage: CGImage, maxPixel: CGFloat) -> Data? {
-        let largestSide = max(cgImage.width, cgImage.height)
-        guard largestSide > 0 else { return nil }
-        let scale = min(1, maxPixel / CGFloat(largestSide))
-        let width = max(1, Int((CGFloat(cgImage.width) * scale).rounded()))
-        let height = max(1, Int((CGFloat(cgImage.height) * scale).rounded()))
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return nil
-        }
-
-        context.interpolationQuality = .high
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let resized = context.makeImage() else { return nil }
-
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
-            return nil
-        }
-        CGImageDestinationAddImage(destination, resized, nil)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return data as Data
-    }
 }
 
 // MARK: - Bounded burst polling, filtering and persistence
@@ -920,7 +900,7 @@ extension ClipboardStore {
 
     /// D7: self-writes and stop invalidate burst state, including the pending
     /// observation, and bump the generation so stale tasks cannot clear newer state.
-    private func cancelBurstScheduling() {
+    func cancelBurstScheduling() {
         burstGeneration += 1
         burstTask?.cancel()
         burstTask = nil
@@ -949,7 +929,19 @@ extension ClipboardStore {
         selectID(filteredItems.first?.id)
     }
 
+    /// The single Store save entry point. Every production history write — the
+    /// capture buffer, an actual baseline trim, a deferred metadata save, a
+    /// link-preview update — converges here, so this is the whole persistence
+    /// barrier.
     func saveItems() {
+        guard historyRestoreState == .ready else {
+            // Before baseline installation and replay finish, nothing may start
+            // a save transaction, write a capture blob or a replacement
+            // manifest, or be collected as garbage. The deferred request is
+            // committed once, after all replay and final reconciliation.
+            isBootstrapDirty = true
+            return
+        }
         persistItems(items)
     }
 

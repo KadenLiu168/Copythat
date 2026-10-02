@@ -104,6 +104,7 @@ struct BottomPanelView: View {
                         }
                     )
                 )
+                .disabled(!store.canMutateHistory)
             }
     }
 
@@ -246,6 +247,13 @@ struct BottomPanelView: View {
         .animation(.smooth(duration: 0.12).delay(contentVisible ? 0.06 : 0), value: contentVisible)
     }
 
+}
+
+// Detailed layout, filtering and pinboard actions live here: a same-file
+// extension keeps the struct body to its state, initializer and top-level
+// composition. Swift's `private` is file-scoped, so moving declarations into
+// this extension changes no access level and no behavior.
+extension BottomPanelView {
     private func searchFieldContent(contentVisible: Bool) -> some View {
         HStack(spacing: 8) {
             TextField("Search", text: $store.searchText)
@@ -350,6 +358,7 @@ struct BottomPanelView: View {
             title: displayTitle(for: board),
             dotColor: pinboardDotColor(for: board),
             isSelected: isSelected,
+            canMutateHistory: store.canMutateHistory,
             onDelete: board.kind == .custom ? { requestPinboardDeletion(for: board) } : nil,
             onEdit: board.kind == .custom ? { requestPinboardEdit(for: board) } : nil
         ) {
@@ -395,20 +404,19 @@ struct BottomPanelView: View {
 
     @ViewBuilder
     private var timeline: some View {
-        if store.filteredItems.isEmpty {
-            emptyTimeline
+        if let copy = HistoryPresentation.timelineCopy(
+            isRestoring: store.isRestoringHistory,
+            isFilteredEmpty: store.filteredItems.isEmpty,
+            searchText: store.searchText,
+            board: Pinboard(id: store.selectedBoardID)
+        ) {
+            EmptyTimelineView(title: copy.title, description: copy.description)
+                .frame(maxWidth: .infinity)
+                .frame(height: 258)
+                .frame(maxHeight: .infinity, alignment: .center)
         } else {
             cardTimeline
         }
-    }
-
-    private var emptyTimeline: some View {
-        let copy = emptyTimelineCopy
-
-        return EmptyTimelineView(title: copy.title, description: copy.description)
-            .frame(maxWidth: .infinity)
-            .frame(height: 258)
-            .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private var cardTimeline: some View {
@@ -432,24 +440,6 @@ struct BottomPanelView: View {
         }
     }
 
-    private var emptyTimelineCopy: (title: String, description: String) {
-        let query = store.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !query.isEmpty {
-            return ("No matching clips", "Try another search or clear the query.")
-        }
-
-        let board = Pinboard(id: store.selectedBoardID)
-        switch board.kind {
-        case .all, .unknown:
-            return ("Copy something to start", "Text, links, images, and file paths will appear here.")
-        case .pinned:
-            return ("No pinned clips", "Pin copied items to keep them close.")
-        case .custom:
-            let title = board.title.isEmpty ? "this pinboard" : board.title
-            return ("No clips in \(title)", "Move copied items here from a card menu.")
-        }
-    }
-
     private func timelineCard(for item: ClipboardItem, selectedID: UUID?) -> some View {
         let isSelected = item.id == selectedID
 
@@ -460,6 +450,7 @@ struct BottomPanelView: View {
             hidesPreview: hidesPreviews,
             panelVisible: store.panelVisible,
             authorizationGeneration: store.panelAuthorizationGeneration,
+            canMutateHistory: store.canMutateHistory,
             mediaLoader: store.mediaLoader,
             store: store,
             onSelect: { store.select(item) },
@@ -489,7 +480,11 @@ struct BottomPanelView: View {
                     .foregroundStyle(Color(red: 0.25, green: 0.20, blue: 0.16).opacity(0.58))
             }
             Spacer()
-            Text("\(store.filteredItems.count) items")
+            // A count taken while loading would read as an authoritative zero.
+            Text(HistoryPresentation.visibleCount(
+                isRestoring: store.isRestoringHistory,
+                visible: store.filteredItems.count
+            ))
                 .foregroundStyle(Color(red: 0.25, green: 0.20, blue: 0.16).opacity(0.52))
         }
         .font(CopythatFont.font(size: 10, weight: .medium))
@@ -535,6 +530,9 @@ struct BottomPanelView: View {
     }
 
     private func requestPinboardDeletion(for board: Pinboard) {
+        // The whole confirmation flow is unavailable while history mutations
+        // are, so no stale confirmation can reach a settings change.
+        guard store.canMutateHistory else { return }
         guard let name = board.customName else { return }
         pinboardDeletionRequest = PinboardDeletionRequest(
             name: name,
@@ -543,12 +541,19 @@ struct BottomPanelView: View {
     }
 
     private func requestPinboardEdit(for board: Pinboard) {
+        guard store.canMutateHistory else { return }
         guard let name = board.customName,
               let pinboard = settings.customPinboards.first(where: { $0.name == name }) else { return }
         pinboardEditRequest = PinboardEditRequest(pinboard: pinboard)
     }
 
     private func confirmPinboardEdit(_ request: PinboardEditRequest, newName: String, color: PinboardColorToken) {
+        // Re-checked on execution: the popover or alert may have been opened
+        // before history became unavailable.
+        guard store.canMutateHistory else {
+            pinboardEditRequest = nil
+            return
+        }
         let currentName = request.pinboard.name
         let trimmedNewName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard settings.updateCustomPinboard(named: currentName, newName: trimmedNewName, color: color) else { return }
@@ -560,6 +565,10 @@ struct BottomPanelView: View {
     }
 
     private func confirmPinboardDeletion(_ request: PinboardDeletionRequest) {
+        guard store.canMutateHistory else {
+            pinboardDeletionRequest = nil
+            return
+        }
         guard settings.deleteCustomPinboard(named: request.name) else { return }
         store.clearPinboardAssignments(named: request.name)
         store.selectClipboardIfViewingPinboard(named: request.name)
@@ -727,6 +736,7 @@ private struct PinboardFilterButton: View {
     let title: String
     let dotColor: Color
     let isSelected: Bool
+    let canMutateHistory: Bool
     let onDelete: (() -> Void)?
     let onEdit: (() -> Void)?
     let action: () -> Void
@@ -738,9 +748,11 @@ private struct PinboardFilterButton: View {
                 .contextMenu {
                     if let onEdit {
                         Button("Edit Pinboard...", action: onEdit)
+                            .disabled(!canMutateHistory)
                     }
                     if let onDelete {
                         Button("Delete Pinboard...", role: .destructive, action: onDelete)
+                            .disabled(!canMutateHistory)
                     }
                 }
         } else {

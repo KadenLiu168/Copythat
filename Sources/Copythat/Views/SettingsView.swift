@@ -21,12 +21,25 @@ struct SettingsView: View {
                 }
                 Toggle("Record sensitive clipboard contents", isOn: $settings.recordSensitiveContent)
                 HStack {
-                    Text("Clipboard cards: \(store.items.count)")
+                    // A count read while loading would look like an
+                    // authoritative zero, so it is identified as loading.
+                    Text(HistoryPresentation.cardSummary(
+                        isRestoring: store.isRestoringHistory,
+                        cardCount: store.items.count
+                    ))
+                    .lineLimit(1)
                     Spacer()
                     Button("Clear Cards...") {
+                        // Re-checked on activation: the window may have been
+                        // open before history finished restoring.
+                        guard store.canMutateHistory else { return }
                         isShowingClearHistoryConfirmation = true
                     }
-                    .disabled(store.items.isEmpty)
+                    .disabled(!HistoryPresentation.canClearCards(
+                        isRestoring: store.isRestoringHistory,
+                        canMutateHistory: store.canMutateHistory,
+                        cardCount: store.items.count
+                    ))
                 }
             }
 
@@ -85,15 +98,24 @@ struct SettingsView: View {
             isPresented: $isShowingClearHistoryConfirmation
         ) {
             Button("Clear Regular Cards", role: .destructive) {
-                store.clearHistory(includePinnedAndPinboardItems: false)
+                clearHistory(includePinnedAndPinboardItems: false)
             }
             Button("Clear All Cards", role: .destructive) {
-                store.clearHistory(includePinnedAndPinboardItems: true)
+                clearHistory(includePinnedAndPinboardItems: true)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Regular cards exclude pinned cards and cards in pinboards.")
         }
+    }
+
+    /// A confirmation that runs while history mutations are unavailable does
+    /// nothing at all: no deletion, no pasteboard clear, no image invalidation
+    /// and no save request, and it is never deferred until later.
+    private func clearHistory(includePinnedAndPinboardItems: Bool) {
+        guard store.canMutateHistory else { return }
+        isShowingClearHistoryConfirmation = false
+        store.clearHistory(includePinnedAndPinboardItems: includePinnedAndPinboardItems)
     }
 
     private func requestAccessibility() {

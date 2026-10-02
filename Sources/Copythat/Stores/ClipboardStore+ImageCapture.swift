@@ -62,6 +62,37 @@ extension ClipboardStore {
         pendingImageCaptureCount > 0
     }
 
+    /// Awaits the admitted image pipeline going idle.
+    ///
+    /// Waiters hold only a continuation, never queue or payload state. The loop
+    /// rechecks after every wake-up, so a completion that starts further work
+    /// simply parks again. Every terminal path reaches the wake below, and none
+    /// of them releases a physical slot before it does.
+    func drainAdmittedImageCaptures() async {
+        while hasPendingImageCapture {
+            await withCheckedContinuation { continuation in
+                // Recheck in the same MainActor turn: the pipeline may have
+                // gone idle between the guard and this append.
+                guard hasPendingImageCapture else {
+                    continuation.resume()
+                    return
+                }
+                imageDrainWaiters.append(continuation)
+            }
+        }
+    }
+
+    /// Wakes every drain waiter once the pipeline holds no accepted work. Each
+    /// one rechecks for itself, so an extra wake-up is harmless.
+    func resumeImageDrainWaitersIfIdle() {
+        guard !hasPendingImageCapture else { return }
+        let waiters = imageDrainWaiters
+        imageDrainWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
     /// Deletion-authority records currently retained. Suppression is transient
     /// bookkeeping over the outstanding admission window, so this must fall
     /// back to zero once no buffered capture can still be rejected.
@@ -79,6 +110,9 @@ extension ClipboardStore {
         source: ClipboardSource,
         currentChangeCount: Int
     ) {
+        // A normal-Quit pause closes new admission without revoking eligibility
+        // for what was already accepted.
+        guard !isCaptureAdmissionPaused else { return }
         let capture = PendingImageCapture(
             sequence: nextImageAdmissionSequence,
             generation: imageCaptureGeneration,
@@ -151,6 +185,10 @@ extension ClipboardStore {
         pruneDeletionCutoffs()
         imageCompletionHandledObserver?()
         startNextImageCaptureIfIdle()
+        // Every terminal path reaches here — success, nil encoding and a
+        // rejected stale result alike — so a drain waiter always rechecks, and
+        // the slot is already released before it does.
+        resumeImageDrainWaitersIfIdle()
     }
 
     private func makeImageItem(for capture: PendingImageCapture, prepared: PreparedMedia) -> ClipboardItem {

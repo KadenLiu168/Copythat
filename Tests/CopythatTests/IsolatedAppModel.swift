@@ -32,3 +32,29 @@ func isolatedAppSettings() -> AppSettings {
     defaults.removePersistentDomain(forName: suite)
     return settings
 }
+
+/// Production-style model whose startup restoration is still in flight, so a
+/// termination test can hold the loader and observe the loading state. Nothing
+/// here reads or writes real persisted history.
+@MainActor
+func isolatedRestoringAppModel(
+    loader: any ClipboardHistoryLoading,
+    coordinator: ClipboardHistorySaveCoordinator? = nil,
+    encoder: ControlledImageEncoder? = nil
+) -> AppModel {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("IsolatedRestoringAppModel-\(UUID().uuidString)", isDirectory: true)
+    let persistence = ClipboardHistoryPersistence(
+        directoryURL: directory,
+        userDefaults: UserDefaults(suiteName: "IsolatedRestoringAppModel.\(UUID().uuidString)")!
+    )
+    let encoder = encoder ?? ControlledImageEncoder()
+    return AppModel(
+        historySaveCoordinator: coordinator ?? ClipboardHistorySaveCoordinator(worker: DiscardHistorySaves()),
+        pasteboard: NSPasteboard.withUniqueName(),
+        settings: isolatedAppSettings(),
+        mediaLoader: ClipboardHistoryMediaLoader(blobStore: persistence.blobStore),
+        historyLoader: loader,
+        encodeImage: { cgImage, recorder in await encoder.encode(cgImage, recorder: recorder) }
+    )
+}

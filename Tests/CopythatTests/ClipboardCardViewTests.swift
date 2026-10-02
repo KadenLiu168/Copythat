@@ -124,6 +124,7 @@ struct ClipboardCardViewTests {
         #expect(card(base, hidesPreview: true) != card(base))
         #expect(card(base, panelVisible: true) != card(base))
         #expect(card(base, authorizationGeneration: 1) != card(base))
+        #expect(card(base, canMutateHistory: false) != card(base))
 
         // These inputs sit outside the item projection, so they change card
         // equality without changing what the item itself renders.
@@ -287,7 +288,8 @@ struct ClipboardCardViewTests {
         isSelected: Bool = false,
         hidesPreview: Bool = false,
         panelVisible: Bool = false,
-        authorizationGeneration: Int = 0
+        authorizationGeneration: Int = 0,
+        canMutateHistory: Bool = true
     ) -> ClipboardCardView {
         ClipboardCardView(
             item: fixture.item,
@@ -296,6 +298,7 @@ struct ClipboardCardViewTests {
             hidesPreview: hidesPreview,
             panelVisible: panelVisible,
             authorizationGeneration: authorizationGeneration,
+            canMutateHistory: canMutateHistory,
             mediaLoader: Self.mediaLoader,
             store: Self.store,
             onSelect: {},
